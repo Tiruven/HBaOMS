@@ -1,9 +1,11 @@
+// components/admin/Sidebar.tsx
 "use client";
 
 import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { useStaffRole } from "@/lib/roleContext";
 import {
   LayoutDashboard,
   Hotel,
@@ -16,10 +18,15 @@ import {
   UserCheck,
   Wrench,
   DollarSign,
-  BarChart3,
   ChevronLeft,
   ChevronRight,
   ShieldCheck,
+  Bell,
+  CreditCard,
+  Tag,
+  Clock,
+  Layers,
+  MapPin,
 } from "lucide-react";
 
 interface NavGroup {
@@ -28,7 +35,6 @@ interface NavGroup {
     title: string;
     href: string;
     icon: React.ElementType;
-    isPlaceholder?: boolean;
   }[];
 }
 
@@ -40,30 +46,53 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    group: "Rooms & Properties",
+    group: "Front Desk & Guests",
+    items: [
+      { title: "Bookings", href: "/admin/bookings", icon: CalendarCheck },
+      { title: "Check In / Out", href: "/admin/check-in-out", icon: UserCheck },
+      { title: "Customers", href: "/admin/customers", icon: Users },
+      { title: "Payments", href: "/admin/payments", icon: CreditCard },
+      { title: "Notifications", href: "/admin/notifications", icon: Bell },
+    ],
+  },
+  {
+    group: "Rooms & Amenities",
     items: [
       { title: "Room Types", href: "/admin/room-types", icon: Hotel },
       { title: "Rooms", href: "/admin/rooms", icon: BedDouble },
       { title: "Features", href: "/admin/features", icon: Sparkles },
+      { title: "Room Features", href: "/admin/room-features", icon: Layers },
     ],
   },
   {
     group: "Services & Tours",
     items: [
-      { title: "Services", href: "/admin/services", icon: ConciergeBell },
-      { title: "Tours", href: "/admin/tours", icon: Compass },
+      { title: "Services Catalog", href: "/admin/services", icon: ConciergeBell },
+      { title: "Service Bookings", href: "/admin/service-bookings", icon: Clock },
+      { title: "Tours Catalog", href: "/admin/tours", icon: Compass },
+      { title: "Trips Schedule", href: "/admin/trips", icon: MapPin },
+      { title: "Trip Bookings", href: "/admin/trip-bookings", icon: CalendarCheck },
     ],
   },
   {
-    group: "Human Resources",
-    items: [{ title: "Staff Directory", href: "/admin/staff", icon: Users }],
+    group: "Maintenance & Rates",
+    items: [
+      { title: "Maintenance", href: "/admin/maintenance", icon: Wrench },
+      { title: "Pricing Rules", href: "/admin/pricing-rules", icon: Tag },
+    ],
   },
-
+  {
+    group: "Administration",
+    items: [
+      { title: "Staff Directory", href: "/admin/staff", icon: Users },
+    ],
+  },
 ];
 
 export const Sidebar: React.FC = () => {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const { role, canAccess, isLoadingRole } = useStaffRole();
 
   return (
     <aside
@@ -84,7 +113,7 @@ export const Sidebar: React.FC = () => {
                 HBaOMS
               </h1>
               <span className="text-[10px] text-gold-300 font-medium tracking-wider uppercase">
-                Hotel Admin Panel
+                Hotel Operations
               </span>
             </div>
           </div>
@@ -111,49 +140,50 @@ export const Sidebar: React.FC = () => {
 
       {/* Navigation Links */}
       <div className="flex-1 overflow-y-auto py-4 px-3 space-y-6">
-        {navGroups.map((group, groupIdx) => (
-          <div key={groupIdx} className="space-y-1">
-            {!collapsed && (
-              <h3 className="px-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                {group.group}
-              </h3>
-            )}
+        {navGroups.map((group, groupIdx) => {
+          // Filter items based on role access
+          const allowedItems = group.items.filter((item) => canAccess(item.href));
+          if (allowedItems.length === 0) return null;
 
-            {group.items.map((item, itemIdx) => {
-              const isActive = pathname === item.href;
-              const Icon = item.icon;
+          return (
+            <div key={groupIdx} className="space-y-1">
+              {!collapsed && (
+                <h3 className="px-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  {group.group}
+                </h3>
+              )}
 
-              return (
-                <Link
-                  key={itemIdx}
-                  href={item.href}
-                  className={cn(
-                    "flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all group relative",
-                    isActive
-                      ? "bg-gold-500 text-navy-900 font-bold shadow-md"
-                      : "text-slate-300 hover:bg-navy-800 hover:text-white"
-                  )}
-                  title={collapsed ? item.title : undefined}
-                >
-                  <Icon
+              {allowedItems.map((item, itemIdx) => {
+                const isActive = pathname === item.href;
+                const Icon = item.icon;
+
+                return (
+                  <Link
+                    key={itemIdx}
+                    href={item.href}
                     className={cn(
-                      "h-5 w-5 shrink-0 transition-colors",
-                      isActive ? "text-navy-900" : "text-gold-500 group-hover:text-gold-300"
+                      "flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all group relative",
+                      isActive
+                        ? "bg-gold-500 text-navy-900 font-bold shadow-md"
+                        : "text-slate-300 hover:bg-navy-800 hover:text-white"
                     )}
-                  />
-                  {!collapsed && (
-                    <span className="flex-1 truncate">{item.title}</span>
-                  )}
-                  {!collapsed && item.isPlaceholder && (
-                    <span className="text-[10px] bg-navy-800 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700">
-                      Soon
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
-          </div>
-        ))}
+                    title={collapsed ? item.title : undefined}
+                  >
+                    <Icon
+                      className={cn(
+                        "h-5 w-5 shrink-0 transition-colors",
+                        isActive ? "text-navy-900" : "text-gold-500 group-hover:text-gold-300"
+                      )}
+                    />
+                    {!collapsed && (
+                      <span className="flex-1 truncate">{item.title}</span>
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+          );
+        })}
       </div>
 
       {/* Footer Role Badge */}
@@ -161,10 +191,12 @@ export const Sidebar: React.FC = () => {
         {!collapsed ? (
           <div className="flex items-center space-x-2 text-xs text-slate-300 px-2 py-1 bg-navy-900/80 rounded border border-navy-700">
             <ShieldCheck className="h-4 w-4 text-gold-500" />
-            <span className="truncate">Role: <strong className="text-gold-300 font-medium">Administrator</strong></span>
+            <span className="truncate">
+              Role: <strong className="text-gold-300 font-medium">{role || (isLoadingRole ? "Loading..." : "Guest")}</strong>
+            </span>
           </div>
         ) : (
-          <div className="flex justify-center" title="Administrator Role Verified">
+          <div className="flex justify-center" title={`Role: ${role || "Staff"}`}>
             <ShieldCheck className="h-5 w-5 text-gold-500" />
           </div>
         )}
