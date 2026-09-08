@@ -56,6 +56,7 @@ export const ROLE_PERMISSIONS: Record<StaffRole, AdminModulePath[]> = {
     "/admin/trip-bookings",
     "/admin/notifications",
     "/admin/payments",
+    "/admin/rooms",
   ],
   Housekpr: ["/admin/dashboard", "/admin/rooms", "/admin/maintenance"],
   Technician: ["/admin/dashboard", "/admin/maintenance"],

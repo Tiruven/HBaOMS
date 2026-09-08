@@ -4,9 +4,9 @@
 import React, { useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { UserButton, useUser } from "@clerk/nextjs";
+import { UserButton, useUser, SignOutButton } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
-import { Hotel, BedDouble, Calendar, User, Sparkles } from "lucide-react";
+import { Hotel, BedDouble, Calendar, User, Sparkles, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function CustomerLayout({ children }: { children: React.ReactNode }) {
@@ -72,7 +72,6 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
     { label: "Dashboard", href: "/customer/dashboard", icon: Calendar },
     { label: "Rooms", href: "/customer/rooms", icon: BedDouble },
     { label: "My Bookings", href: "/customer/bookings", icon: Sparkles },
-    { label: "Profile", href: "/customer/profile", icon: User },
   ];
 
   return (
@@ -124,7 +123,9 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
                 <BedDouble className="h-4 w-4" /> Book Room
               </Link>
             </Button>
-            <UserButton afterSignOutUrl="/" />
+            <div className="flex items-center gap-2 border-l border-slate-200 pl-3">
+              <UserButton afterSignOutUrl="/" />
+            </div>
           </div>
         </div>
 

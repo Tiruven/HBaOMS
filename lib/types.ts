@@ -85,6 +85,7 @@ export interface Booking extends AuditFields {
   booking_status: "Pending" | "Confirmed" | "Cancelled";
   booking_type: "RO" | "HB" | "FB";
   customer_cust_id: number;
+  stripe_session_id?: string | null;
   customer?: Customer;
 }
 
@@ -95,16 +96,17 @@ export interface CheckInOut extends AuditFields {
   check_out_date: string;
   actual_check_in?: string | null;
   actual_check_out?: string | null;
+  status?: string | null;
   room?: Room;
   booking?: Booking;
 }
 
 export interface Payment extends AuditFields {
-  pay_id: number;
-  payment_id?: number;
+  payment_id: number;
+  pay_id?: number;
   payment_date: string;
-  amount_paid: number;
-  payment_amount?: number;
+  payment_amount: number;
+  amount_paid?: number;
   payment_method: string;
   payment_type?: string;
   booking_booking_id: number;

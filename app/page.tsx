@@ -102,9 +102,6 @@ export default function LandingPage() {
         <div className="absolute inset-0 bg-gradient-to-t from-[#1A202C] via-transparent to-[#1A202C]/60" />
 
         <div className="relative max-w-4xl mx-auto px-4 text-center text-white space-y-6 py-20">
-          <Badge className="bg-[#A37836] text-white px-4 py-1 text-xs uppercase tracking-widest font-semibold border-none">
-            5-Star Luxury Resort • Grand Baie, Mauritius
-          </Badge>
           <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight leading-tight">
             An Unrivalled Haven of Serenity & Tropical Luxury
           </h1>

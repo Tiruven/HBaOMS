@@ -28,7 +28,7 @@ export default function CustomerRoomsPage() {
 
   // Filters
   const [selectedType, setSelectedType] = useState<string>("ALL");
-  const [maxPriceFilter, setMaxPriceFilter] = useState<string>("");
+  const [maxPriceFilter, setMaxPriceFilter] = useState<string>("30000");
   const [searchQuery, setSearchQuery] = useState<string>("");
 
   useEffect(() => {
@@ -126,13 +126,20 @@ export default function CustomerRoomsPage() {
         </div>
 
         <div className="w-full sm:w-1/2 md:w-1/4 space-y-2">
-          <Label className="text-xs font-bold text-slate-600">Max Base Rate (MUR)</Label>
-          <Input
-            type="number"
-            placeholder="e.g. 25000"
-            value={maxPriceFilter}
+          <div className="flex justify-between items-center">
+            <Label className="text-xs font-bold text-slate-600">Max Base Rate (MUR)</Label>
+            <span className="text-xs font-semibold text-[#A37836]">
+              {maxPriceFilter ? `MUR ${Number(maxPriceFilter).toLocaleString()}` : "Any Price"}
+            </span>
+          </div>
+          <input
+            type="range"
+            min="1000"
+            max="30000"
+            step="500"
+            value={maxPriceFilter || "30000"}
             onChange={(e) => setMaxPriceFilter(e.target.value)}
-            className="bg-[#F8F7F4] border-[#E5E2DC]"
+            className="w-full h-2 bg-[#F4EFE6] rounded-lg appearance-none cursor-pointer accent-[#A37836] border border-[#E5E2DC]"
           />
         </div>
 
@@ -140,7 +147,7 @@ export default function CustomerRoomsPage() {
           variant="outline"
           onClick={() => {
             setSelectedType("ALL");
-            setMaxPriceFilter("");
+            setMaxPriceFilter("30000");
             setSearchQuery("");
           }}
           className="border-[#E5E2DC] text-slate-600 gap-1 hover:bg-[#F4EFE6]"

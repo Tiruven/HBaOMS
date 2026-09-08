@@ -1,9 +1,10 @@
 "use client";
 
 import React from "react";
-import { UserButton, useUser } from "@clerk/nextjs";
-import { Bell, Shield } from "lucide-react";
+import { UserButton, useUser, SignOutButton } from "@clerk/nextjs";
+import { Bell, Shield, LogOut } from "lucide-react";
 import { Breadcrumbs } from "@/components/admin/Breadcrumbs";
+import { Button } from "@/components/ui/button";
 
 import { useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";

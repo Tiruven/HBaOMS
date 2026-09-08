@@ -69,16 +69,19 @@ export default function CustomerBookingsListPage() {
     }
   }, [user]);
 
+  const executedSessionRef = React.useRef<string | null>(null);
+
   // On mount: check if redirected from Stripe success
   useEffect(() => {
     const sessionId = searchParams.get("session_id");
     const success = searchParams.get("success");
 
     if (sessionId && success === "true") {
-      // Remove query params from URL without refresh
+      if (executedSessionRef.current === sessionId) return;
+      executedSessionRef.current = sessionId;
+
       router.replace("/customer/bookings", { scroll: false });
 
-      // Call verify-payment API to create the booking in Supabase
       async function verifyAndCreate() {
         setVerifyStatus("verifying");
         setVerifyMessage("Confirming your payment and creating your reservation...");
@@ -99,7 +102,6 @@ export default function CustomerBookingsListPage() {
                 ? "Your booking was already confirmed!"
                 : `Booking #${data.bookingId} confirmed! Your resort stay is reserved.`
             );
-            // Re-fetch bookings to show the new one
             await fetchBookings();
           } else {
             setVerifyStatus("error");

@@ -5,7 +5,7 @@ import React, { useEffect, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
 import { CheckInOut, Room, Booking } from "@/lib/types";
-import { formatDate } from "@/lib/utils";
+import { formatDate, cn } from "@/lib/utils";
 import { SkeletonTable } from "@/components/shared/SkeletonTable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -184,6 +184,46 @@ export default function CheckInOutPage() {
     }
   };
 
+  const handleCheckIn = async (stay: CheckInOut) => {
+    try {
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from("check_in_out")
+        .update({
+          actual_check_in: now,
+          status: "Checked In"
+        })
+        .eq("room_room_id", stay.room_room_id)
+        .eq("booking_booking_id", stay.booking_booking_id);
+
+      if (error) throw error;
+      await fetchData();
+    } catch (err: any) {
+      console.error("Check in error:", err);
+      alert("Failed to check in: " + err.message);
+    }
+  };
+
+  const handleCheckOut = async (stay: CheckInOut) => {
+    try {
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from("check_in_out")
+        .update({
+          actual_check_out: now,
+          status: "Checked Out"
+        })
+        .eq("room_room_id", stay.room_room_id)
+        .eq("booking_booking_id", stay.booking_booking_id);
+
+      if (error) throw error;
+      await fetchData();
+    } catch (err: any) {
+      console.error("Check out error:", err);
+      alert("Failed to check out: " + err.message);
+    }
+  };
+
   const filteredStays = stays.filter((s) => {
     const search = searchTerm.toLowerCase();
     const custName = `${s.booking?.customer?.cust_fname || ""} ${s.booking?.customer?.cust_lname || ""}`.toLowerCase();
@@ -225,9 +265,9 @@ export default function CheckInOutPage() {
                 <tr>
                   <th className="px-4 py-3">Room</th>
                   <th className="px-4 py-3">Booking & Guest</th>
-                  <th className="px-4 py-3">Check-In Date</th>
-                  <th className="px-4 py-3">Check-Out Date</th>
-                  <th className="px-4 py-3">Assigned By</th>
+                  <th className="px-4 py-3">Scheduled Dates</th>
+                  <th className="px-4 py-3">Actual Check-In/Out</th>
+                  <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
@@ -252,10 +292,40 @@ export default function CheckInOutPage() {
                         </div>
                         <div className="text-xs text-slate-500 font-mono">Booking #{s.booking_booking_id}</div>
                       </td>
-                      <td className="px-4 py-3 font-medium text-emerald-700">{formatDate(s.check_in_date)}</td>
-                      <td className="px-4 py-3 font-medium text-amber-700">{formatDate(s.check_out_date)}</td>
-                      <td className="px-4 py-3 text-xs text-slate-500">{s.created_by || "System"}</td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3 text-xs space-y-1">
+                        <div className="text-emerald-700">In: {formatDate(s.check_in_date)}</div>
+                        <div className="text-amber-700">Out: {formatDate(s.check_out_date)}</div>
+                      </td>
+                      <td className="px-4 py-3 text-xs space-y-1">
+                        <div>In: {s.actual_check_in ? formatDate(s.actual_check_in) : <span className="text-slate-400 font-normal italic">Not yet</span>}</div>
+                        <div>Out: {s.actual_check_out ? formatDate(s.actual_check_out) : <span className="text-slate-400 font-normal italic">Not yet</span>}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge
+                          className={cn(
+                            "text-xs font-semibold px-2 py-0.5 rounded border",
+                            s.status === "Checked Out"
+                              ? "bg-slate-100 text-slate-700 border-slate-200"
+                              : s.status === "Checked In"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : "bg-blue-50 text-blue-700 border-blue-200"
+                          )}
+                          variant="outline"
+                        >
+                          {s.status || "Scheduled"}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-right space-x-2">
+                        {(!s.status || s.status === "Scheduled") && (
+                          <Button size="sm" variant="gold" className="text-xs" onClick={() => handleCheckIn(s)}>
+                            Check In
+                          </Button>
+                        )}
+                        {s.status === "Checked In" && (
+                          <Button size="sm" variant="outline" className="text-xs border-amber-600 text-amber-600 hover:bg-amber-50" onClick={() => handleCheckOut(s)}>
+                            Check Out
+                          </Button>
+                        )}
                         <Button variant="ghost" size="sm" onClick={() => handleOpenDelete(s)}>
                           <Trash2 className="h-4 w-4 text-red-600" />
                         </Button>
@@ -270,20 +340,56 @@ export default function CheckInOutPage() {
           {/* Mobile View */}
           <div className="md:hidden space-y-4">
             {filteredStays.map((s) => (
-              <div key={`${s.room_room_id}-${s.booking_booking_id}`} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-2">
+              <div key={`${s.room_room_id}-${s.booking_booking_id}`} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
                 <div className="flex justify-between items-center">
                   <Badge variant="outline" className="font-mono font-bold">Room #{s.room_room_id}</Badge>
-                  <span className="text-xs text-slate-500 font-mono">Booking #{s.booking_booking_id}</span>
+                  <Badge
+                    className={cn(
+                      "text-xs font-semibold px-2 py-0.5 rounded border",
+                      s.status === "Checked Out"
+                        ? "bg-slate-100 text-slate-700 border-slate-200"
+                        : s.status === "Checked In"
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : "bg-blue-50 text-blue-700 border-blue-200"
+                    )}
+                    variant="outline"
+                  >
+                    {s.status || "Scheduled"}
+                  </Badge>
                 </div>
                 <div className="font-bold text-navy-900">
                   {s.booking?.customer ? `${s.booking.customer.cust_fname} ${s.booking.customer.cust_lname}` : "Guest"}
                 </div>
-                <div className="text-xs text-slate-600 flex justify-between pt-1">
-                  <span>In: <strong>{formatDate(s.check_in_date)}</strong></span>
-                  <span>Out: <strong>{formatDate(s.check_out_date)}</strong></span>
+                <div className="text-xs text-slate-600 space-y-1">
+                  <div className="flex justify-between">
+                    <span>Scheduled In:</span>
+                    <strong>{formatDate(s.check_in_date)}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Scheduled Out:</span>
+                    <strong>{formatDate(s.check_out_date)}</strong>
+                  </div>
+                  {s.actual_check_in && (
+                    <div className="flex justify-between text-emerald-700">
+                      <span>Actual In:</span>
+                      <strong>{formatDate(s.actual_check_in)}</strong>
+                    </div>
+                  )}
+                  {s.actual_check_out && (
+                    <div className="flex justify-between text-amber-700">
+                      <span>Actual Out:</span>
+                      <strong>{formatDate(s.actual_check_out)}</strong>
+                    </div>
+                  )}
                 </div>
-                <div className="pt-2 border-t border-slate-100 text-right">
-                  <Button variant="destructive" size="sm" onClick={() => handleOpenDelete(s)}>Delete Allocation</Button>
+                <div className="pt-2 border-t border-slate-100 flex justify-end gap-2">
+                  {(!s.status || s.status === "Scheduled") && (
+                    <Button size="sm" variant="gold" onClick={() => handleCheckIn(s)}>Check In</Button>
+                  )}
+                  {s.status === "Checked In" && (
+                    <Button size="sm" variant="outline" className="border-amber-600 text-amber-600 hover:bg-amber-50" onClick={() => handleCheckOut(s)}>Check Out</Button>
+                  )}
+                  <Button variant="destructive" size="sm" onClick={() => handleOpenDelete(s)}>Delete</Button>
                 </div>
               </div>
             ))}

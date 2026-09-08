@@ -43,6 +43,57 @@ const WIZARD_STEPS = [
   "Review & Pay",
 ];
 
+function findNextAvailableDates(
+  requestedInStr: string,
+  durationDays: number,
+  stays: { in: string; out: string }[]
+) {
+  let candidateIn = new Date((requestedInStr || new Date().toISOString().split("T")[0]) + "T00:00:00.000Z");
+  let isAvailable = false;
+  let loops = 0;
+
+  while (!isAvailable && loops < 100) {
+    loops++;
+    const candInStr = candidateIn.toISOString().split("T")[0];
+    const candOutDate = new Date(candidateIn.getTime() + durationDays * 86400000);
+    const candOutStr = candOutDate.toISOString().split("T")[0];
+
+    const overlap = stays.find((s) => candInStr < s.out && candOutStr > s.in);
+
+    if (overlap) {
+      candidateIn = new Date(overlap.out + "T00:00:00.000Z");
+    } else {
+      isAvailable = true;
+    }
+  }
+
+  const nextInStr = candidateIn.toISOString().split("T")[0];
+  const nextOutDate = new Date(candidateIn.getTime() + durationDays * 86400000);
+  const nextOutStr = nextOutDate.toISOString().split("T")[0];
+  return { checkIn: nextInStr, checkOut: nextOutStr };
+}
+
+const RESORT_PACKAGES = [
+  {
+    id: "honeymoon",
+    name: "Honeymoon Escape Package",
+    description: "Includes Spa & Wellness session and Island Catamaran Excursion for two at a bundled rate.",
+    price: 4500,
+    badge: "15% Bundle Savings",
+    services: ["Spa & Wellness"],
+    tours: ["Island Excursion"]
+  },
+  {
+    id: "family",
+    name: "Family Adventure Package",
+    description: "Includes Breakfast Buffet for the family and a City Heritage Walk Tour.",
+    price: 3500,
+    badge: "10% Bundle Savings",
+    services: ["Breakfast Buffet"],
+    tours: ["City Heritage Walk"]
+  }
+];
+
 export default function BookingWizardPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -74,9 +125,37 @@ export default function BookingWizardPage() {
   const [passportNumber, setPassportNumber] = useState<string>("");
   const [country, setCountry] = useState<string>("Mauritius");
   const [errorMsg, setErrorMsg] = useState<string>("");
+  const [suggestedDates, setSuggestedDates] = useState<{ checkIn: string; checkOut: string } | null>(null);
+  const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
 
   // Payment Processing State
   const [isRedirectingToStripe, setIsRedirectingToStripe] = useState<boolean>(false);
+  const [occupiedStays, setOccupiedStays] = useState<{ in: string; out: string }[]>([]);
+
+  useEffect(() => {
+    async function fetchOccupiedStays() {
+      if (!selectedRoom) return;
+      try {
+        const { data } = await supabase
+          .from("check_in_out")
+          .select("check_in_date, check_out_date, booking!inner(booking_status)")
+          .eq("room_room_id", selectedRoom.room_id)
+          .eq("booking.booking_status", "Confirmed");
+
+        if (data) {
+          setOccupiedStays(
+            data.map((d) => ({
+              in: d.check_in_date.split("T")[0],
+              out: d.check_out_date.split("T")[0],
+            }))
+          );
+        }
+      } catch (e) {
+        console.error("Error fetching occupied stays:", e);
+      }
+    }
+    fetchOccupiedStays();
+  }, [selectedRoom]);
 
   useEffect(() => {
     async function loadCatalog() {
@@ -122,6 +201,12 @@ export default function BookingWizardPage() {
     loadCatalog();
   }, [user, preselectedRoomId]);
 
+  useEffect(() => {
+    if (preselectedRoomId) {
+      setCurrentStep(2);
+    }
+  }, [preselectedRoomId]);
+
   // Calculations
   const calculateNights = () => {
     if (!checkInDate || !checkOutDate) return 1;
@@ -148,13 +233,15 @@ export default function BookingWizardPage() {
     return sum + (tour?.adult_price || 0);
   }, 0);
 
-  const subtotal = totalRoomCost + totalServicesCost + totalToursCost;
+  const packageDiscount = selectedPackage === "honeymoon" ? 1500 : selectedPackage === "family" ? 1000 : 0;
+  const subtotal = Math.max(0, totalRoomCost + totalServicesCost + totalToursCost - packageDiscount);
   const vatAmount = subtotal * 0.15; // 15% VAT in Mauritius
   const grandTotal = subtotal + vatAmount;
 
   // Navigation handlers
-  const handleNextStep = () => {
+  const handleNextStep = async () => {
     setErrorMsg("");
+    setSuggestedDates(null);
     if (currentStep === 1 && !selectedRoom) {
       setErrorMsg("Please select a room to proceed.");
       return;
@@ -167,6 +254,44 @@ export default function BookingWizardPage() {
       if (new Date(checkOutDate) <= new Date(checkInDate)) {
         setErrorMsg("Check-out date must be after check-in date.");
         return;
+      }
+
+      if (selectedRoom) {
+        const { data: stays, error } = await supabase
+          .from("check_in_out")
+          .select("check_in_date, check_out_date, booking!inner(booking_status)")
+          .eq("room_room_id", selectedRoom.room_id)
+          .eq("booking.booking_status", "Confirmed");
+
+        if (error) {
+          console.error("Error checking availability:", error);
+        } else if (stays) {
+          const reqInStr = checkInDate;
+          const reqOutStr = checkOutDate;
+
+          const formattedStays = stays.map((s) => ({
+            in: s.check_in_date.split("T")[0],
+            out: s.check_out_date.split("T")[0],
+          }));
+
+          const overlaps = formattedStays.some(
+            (stay) => reqInStr < stay.out && reqOutStr > stay.in
+          );
+
+          if (overlaps) {
+            const reqInDate = new Date(reqInStr + "T00:00:00.000Z");
+            const reqOutDate = new Date(reqOutStr + "T00:00:00.000Z");
+            const duration = Math.max(1, Math.ceil((reqOutDate.getTime() - reqInDate.getTime()) / (1000 * 3600 * 24)));
+            const nextSlot = findNextAvailableDates(reqInStr, duration, formattedStays);
+
+            setSuggestedDates({
+              checkIn: nextSlot.checkIn,
+              checkOut: nextSlot.checkOut,
+            });
+            setErrorMsg(`The room is unavailable for the selected dates. Selected room is already reserved.`);
+            return;
+          }
+        }
       }
     }
     if (currentStep === 4) {
@@ -250,9 +375,31 @@ export default function BookingWizardPage() {
       </div>
 
       {errorMsg && (
-        <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-2xl flex items-center gap-2 text-sm font-semibold">
-          <AlertCircle className="h-5 w-5 text-red-600 shrink-0" />
-          <span>{errorMsg}</span>
+        <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-2xl flex flex-col gap-2 text-sm font-semibold">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-5 w-5 text-red-600 shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+          {suggestedDates && (
+            <div className="mt-2 pl-7 space-y-2">
+              <p className="text-xs text-slate-600 font-medium">
+                Suggested Next Available Dates: <strong>{formatDate(suggestedDates.checkIn)}</strong> to <strong>{formatDate(suggestedDates.checkOut)}</strong>
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setCheckInDate(suggestedDates.checkIn);
+                  setCheckOutDate(suggestedDates.checkOut);
+                  setSuggestedDates(null);
+                  setErrorMsg("");
+                }}
+                className="text-xs border-[#A37836] text-[#A37836] hover:bg-[#F4EFE6] px-3 py-1.5 h-auto rounded-lg font-bold"
+              >
+                Use Suggested Dates
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -320,7 +467,36 @@ export default function BookingWizardPage() {
       {/* STEP 2: Dates & Board Basis */}
       {currentStep === 2 && (
         <div className="bg-white p-8 rounded-3xl border border-[#E5E2DC] shadow-sm space-y-6">
-          <h2 className="text-xl font-bold text-[#1A202C]">Step 2: Dates & Board Plan</h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <h2 className="text-xl font-bold text-[#1A202C]">Step 2: Dates & Board Plan</h2>
+            <span className="text-xs text-slate-500 font-medium">
+              Selected Room #{selectedRoom?.room_id} ({selectedRoom?.room_type?.type})
+            </span>
+          </div>
+
+          {/* Elevated Availability Calendar / Occupied Dates List */}
+          {occupiedStays.length > 0 ? (
+            <div className="bg-red-50 border border-red-200 p-4 rounded-2xl space-y-2">
+              <div className="text-xs font-bold text-red-800 uppercase tracking-wider flex items-center gap-1.5">
+                <Calendar className="h-4 w-4 text-red-600" /> Currently Reserved Date Ranges for Room #{selectedRoom?.room_id}
+              </div>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {occupiedStays.map((stay, idx) => (
+                  <Badge key={idx} className="bg-red-600 text-white text-xs font-semibold px-2.5 py-1 rounded-lg">
+                    Occupied: {formatDate(stay.in)} to {formatDate(stay.out)}
+                  </Badge>
+                ))}
+              </div>
+              <p className="text-[11px] text-red-700">
+                Please pick check-in/out dates outside of these red reserved ranges.
+              </p>
+            </div>
+          ) : (
+            <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl text-xs text-emerald-800 font-semibold flex items-center gap-2">
+              <CheckCircle className="h-4 w-4 text-emerald-600" />
+              Room #{selectedRoom?.room_id} has no existing reservations for upcoming dates!
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div className="space-y-2">
@@ -396,6 +572,73 @@ export default function BookingWizardPage() {
       {currentStep === 3 && (
         <div className="bg-white p-8 rounded-3xl border border-[#E5E2DC] shadow-sm space-y-6">
           <h2 className="text-xl font-bold text-[#1A202C]">Step 3: Enhance Your Stay (Optional)</h2>
+
+          {/* Exclusive Packages */}
+          <div className="space-y-3 pb-6 border-b border-slate-100">
+            <h3 className="font-bold text-sm text-slate-700 flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-[#A37836]" /> Exclusive Resort Packages
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {RESORT_PACKAGES.map((pkg) => {
+                const isSelected = selectedPackage === pkg.id;
+                return (
+                  <div
+                    key={pkg.id}
+                    onClick={() => {
+                      if (isSelected) {
+                        setSelectedPackage(null);
+                        setSelectedServiceIds((prev) => {
+                          const pkgServiceIds = services
+                            .filter((s) => pkg.services.includes(s.service_name))
+                            .map((s) => s.service_id);
+                          return prev.filter((id) => !pkgServiceIds.includes(id));
+                        });
+                        setSelectedTourIds((prev) => {
+                          const pkgTourIds = tours
+                            .filter((t) => pkg.tours.includes(t.tour_name))
+                            .map((t) => t.tour_id);
+                          return prev.filter((id) => !pkgTourIds.includes(id));
+                        });
+                      } else {
+                        setSelectedPackage(pkg.id);
+                        setSelectedServiceIds((prev) => {
+                          const pkgServiceIds = services
+                            .filter((s) => pkg.services.includes(s.service_name))
+                            .map((s) => s.service_id);
+                          return Array.from(new Set([...prev, ...pkgServiceIds]));
+                        });
+                        setSelectedTourIds((prev) => {
+                          const pkgTourIds = tours
+                            .filter((t) => pkg.tours.includes(t.tour_name))
+                            .map((t) => t.tour_id);
+                          return Array.from(new Set([...prev, ...pkgTourIds]));
+                        });
+                      }
+                    }}
+                    className={`p-5 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between ${
+                      isSelected
+                        ? "border-[#A37836] bg-[#F4EFE6] ring-1 ring-[#A37836]"
+                        : "border-[#E5E2DC] hover:border-[#A37836]/60 bg-white"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex justify-between items-start">
+                        <Badge className="bg-[#A37836] text-white text-[9px] uppercase tracking-wider font-bold">
+                          {pkg.badge}
+                        </Badge>
+                        <span className="font-extrabold text-[#1A202C] text-sm">{formatCurrency(pkg.price)}</span>
+                      </div>
+                      <h4 className="font-bold text-sm text-[#1A202C] mt-2">{pkg.name}</h4>
+                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">{pkg.description}</p>
+                    </div>
+                    <div className="text-[10px] font-bold text-[#A37836] mt-4 flex items-center gap-1">
+                      {isSelected ? "✓ PACKAGE APPLIED" : "+ APPLY PACKAGE"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
           {/* Spa & Services */}
           <div className="space-y-3">
@@ -585,6 +828,13 @@ export default function BookingWizardPage() {
                 <div className="flex justify-between">
                   <span className="text-slate-600">Excursion Tours ({selectedTourIds.length})</span>
                   <span className="font-bold text-[#1A202C]">{formatCurrency(totalToursCost)}</span>
+                </div>
+              )}
+
+              {packageDiscount > 0 && (
+                <div className="flex justify-between text-emerald-600 font-semibold">
+                  <span>Bundle Package Discount</span>
+                  <span>-{formatCurrency(packageDiscount)}</span>
                 </div>
               )}
             </div>

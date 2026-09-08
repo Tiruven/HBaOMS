@@ -3,9 +3,7 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
-  apiVersion: "2024-04-10" as any,
-});
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
 
 // Server-side Supabase client using service role key (bypasses RLS)
 const supabase = createClient(
@@ -94,13 +92,14 @@ export async function POST(req: Request) {
         .single();
 
       if (cErr || !newCust) {
-        console.error("Customer insert failed:", cErr);
+        console.error("Customer insert error:", cErr);
         return NextResponse.json({ error: "Failed to create customer record" }, { status: 500 });
       }
       custId = newCust.cust_id;
     }
 
-    // 4. Insert confirmed booking
+    // 4. Insert confirmed booking with duplicate key race condition protection
+    let bookingId: number;
     const { data: newBooking, error: bErr } = await supabase
       .from("booking")
       .insert([
@@ -117,25 +116,126 @@ export async function POST(req: Request) {
       .select("booking_id")
       .single();
 
-    if (bErr || !newBooking) {
-      console.error("Booking insert failed:", bErr);
-      return NextResponse.json({ error: "Failed to create booking" }, { status: 500 });
+    if (bErr) {
+      // Race condition handling if duplicate key occurs
+      if (bErr.code === "23505") {
+        const { data: duplicateBooking } = await supabase
+          .from("booking")
+          .select("booking_id")
+          .eq("stripe_session_id", sessionId)
+          .single();
+
+        if (duplicateBooking) {
+          return NextResponse.json({
+            success: true,
+            bookingId: duplicateBooking.booking_id,
+            alreadyProcessed: true,
+          });
+        }
+      }
+      console.error("Booking insert error:", bErr);
+      return NextResponse.json({ error: "Failed to create booking record" }, { status: 500 });
     }
-    const bookingId = newBooking.booking_id;
+    bookingId = newBooking.booking_id;
 
     // 5. Insert check_in_out stay record
     if (roomId && checkInDate && checkOutDate) {
+      const formattedIn = checkInDate.includes("T") ? checkInDate : `${checkInDate}T14:00:00.000Z`;
+      const formattedOut = checkOutDate.includes("T") ? checkOutDate : `${checkOutDate}T11:00:00.000Z`;
+
       const { error: cioErr } = await supabase.from("check_in_out").insert([
         {
           booking_booking_id: bookingId,
           room_room_id: roomId,
-          check_in_date: checkInDate,
-          check_out_date: checkOutDate,
-          created_by: guestEmail.substring(0, 30),
-          date_created: new Date().toISOString(),
+          check_in_date: formattedIn,
+          check_out_date: formattedOut,
         },
       ]);
-      if (cioErr) console.error("check_in_out insert error:", cioErr.message);
+      if (cioErr) {
+        console.error("check_in_out insert error:", cioErr.message);
+      }
+    }
+
+    // 5b. Insert service bookings
+    const selectedServices = meta.services ? JSON.parse(meta.services) : [];
+    if (selectedServices && Array.isArray(selectedServices) && selectedServices.length > 0) {
+      for (const srvId of selectedServices) {
+        const { data: srv } = await supabase
+          .from("service")
+          .select("price")
+          .eq("service_id", Number(srvId))
+          .maybeSingle();
+
+        const srvPrice = srv?.price || 0;
+        await supabase.from("service_booking").insert([
+          {
+            booking_booking_id: bookingId,
+            service_service_id: Number(srvId),
+            service_date: checkInDate || today,
+            time_in: `${checkInDate || today}T10:00:00.000Z`,
+            time_out: `${checkInDate || today}T11:00:00.000Z`,
+            num_person: 1,
+            total_amount: srvPrice,
+            sb_status: "Confirmed",
+            created_by: "Stripe Verify",
+            date_created: new Date().toISOString(),
+          },
+        ]);
+      }
+    }
+
+    // 5c. Insert trip bookings
+    const selectedTours = meta.tours ? JSON.parse(meta.tours) : [];
+    if (selectedTours && Array.isArray(selectedTours) && selectedTours.length > 0) {
+      for (const tourId of selectedTours) {
+        const { data: tourData } = await supabase
+          .from("tour")
+          .select("adult_price")
+          .eq("tour_id", Number(tourId))
+          .maybeSingle();
+
+        const adultPrice = tourData?.adult_price || 0;
+
+        const { data: existingTrip } = await supabase
+          .from("trip")
+          .select("trip_id")
+          .eq("tour_tour_id", Number(tourId))
+          .eq("trip_status", "Scheduled")
+          .limit(1)
+          .maybeSingle();
+
+        let tripId: number;
+        if (existingTrip) {
+          tripId = existingTrip.trip_id;
+        } else {
+          const { data: newTrip, error: tErr } = await supabase
+            .from("trip")
+            .insert({
+              tour_tour_id: Number(tourId),
+              trip_date: `${checkInDate || today}T09:00:00.000Z`,
+              start_time: `${checkInDate || today}T09:00:00.000Z`,
+              return_time: `${checkInDate || today}T17:00:00.000Z`,
+              trip_status: "Scheduled",
+              created_by: "Stripe Sync",
+            })
+            .select("trip_id")
+            .single();
+
+          if (tErr || !newTrip) {
+            console.error("Trip creation error for tour:", tourId, tErr);
+            continue;
+          }
+          tripId = newTrip.trip_id;
+        }
+
+        await supabase.from("trip_booking").insert({
+          trip_trip_id: tripId,
+          booking_booking_id: bookingId,
+          num_adult: 1,
+          num_child: 0,
+          total_amount: adultPrice,
+        });
+      }
     }
 
     // 6. Insert payment record
@@ -144,9 +244,8 @@ export async function POST(req: Request) {
         booking_booking_id: bookingId,
         payment_date: today,
         payment_type: "Stripe",
-        payment_method: "ON",           // VARCHAR(2) constraint in original schema
+        payment_method: "ON",
         payment_amount: amountPaid,
-        amount_paid: amountPaid,
         created_by: guestEmail.substring(0, 30),
         date_created: new Date().toISOString(),
       },
@@ -167,10 +266,10 @@ export async function POST(req: Request) {
     ]);
     if (notifErr) console.error("notification insert error:", notifErr.message);
 
-    console.log(`✅ Booking #${bookingId} created via Stripe session ${sessionId}`);
+    console.log(`[INFO] Booking #${bookingId} created via Stripe session ${sessionId}`);
     return NextResponse.json({ success: true, bookingId, custId });
   } catch (error: any) {
-    console.error("verify-payment fatal error:", error);
+    console.error("verify-payment error:", error);
     return NextResponse.json(
       { error: error.message || "Payment verification failed" },
       { status: 500 }

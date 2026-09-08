@@ -25,7 +25,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Search, Calendar, User, Trash2, Edit, CheckCircle, Clock, XCircle } from "lucide-react";
+import Link from "next/link";
+import { Plus, Search, Calendar, User, Trash2, Edit, CheckCircle, Clock, XCircle, Eye } from "lucide-react";
 
 export default function BookingsPage() {
   const { user } = useUser();
@@ -259,10 +260,15 @@ export default function BookingsPage() {
                       <td className="px-4 py-3">{getStatusBadge(b.booking_status)}</td>
                       <td className="px-4 py-3 text-xs text-slate-500">{b.created_by || "System"}</td>
                       <td className="px-4 py-3 text-right space-x-2">
-                        <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(b)}>
+                        <Button asChild variant="ghost" size="sm" title="View Full Booking Details">
+                          <Link href={`/admin/bookings/${b.booking_id}`}>
+                            <Eye className="h-4 w-4 text-gold-600" />
+                          </Link>
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(b)} title="Edit Booking">
                           <Edit className="h-4 w-4 text-slate-600" />
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleOpenDelete(b)}>
+                        <Button variant="ghost" size="sm" onClick={() => handleOpenDelete(b)} title="Delete Booking">
                           <Trash2 className="h-4 w-4 text-red-600" />
                         </Button>
                       </td>

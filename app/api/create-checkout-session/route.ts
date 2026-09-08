@@ -3,9 +3,7 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "sk_test_mock_key_hbaoms";
-const stripe = new Stripe(stripeSecretKey, {
-  apiVersion: "2024-04-10" as any,
-});
+const stripe = new Stripe(stripeSecretKey);
 
 export async function POST(req: Request) {
   try {
@@ -32,7 +30,7 @@ export async function POST(req: Request) {
               name: `Resort Stay - ${roomTypeName || "Luxury Suite"} (Room #${roomId})`,
               description: `Check-in: ${checkInDate} | Check-out: ${checkOutDate} | Plan: ${boardType}`,
             },
-            unit_amount: Math.round((totalAmount || 5000) * 100), // Stripe expects amount in cents/sub-units
+            unit_amount: Math.round((totalAmount || 5000) * 100),
           },
           quantity: 1,
         },

@@ -211,7 +211,7 @@ export default function PaymentsPage() {
                         </Badge>
                       </td>
                       <td className="px-4 py-3 font-bold text-emerald-600">
-                        {formatCurrency(p.payment_amount)}
+                        {formatCurrency(p.payment_amount || p.amount_paid || 0)}
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-500">{formatDate(p.date_created)}</td>
                       <td className="px-4 py-3 text-right">

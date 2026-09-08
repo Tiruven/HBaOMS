@@ -10,17 +10,12 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  BedDouble,
-  Calendar,
-  CheckCircle2,
-  Clock,
+  Building,
   Printer,
   ChevronLeft,
   FileText,
   CreditCard,
-  Building,
-  ConciergeBell,
-  Compass,
+  BedDouble,
 } from "lucide-react";
 
 export default function CustomerBookingDetailPage() {
@@ -87,6 +82,24 @@ export default function CustomerBookingDetailPage() {
     );
   }
 
+  const calculateNights = () => {
+    if (!stay?.check_in_date || !stay?.check_out_date) return 1;
+    const d1 = new Date(stay.check_in_date);
+    const d2 = new Date(stay.check_out_date);
+    const diff = Math.ceil((d2.getTime() - d1.getTime()) / (1000 * 3600 * 24));
+    return diff > 0 ? diff : 1;
+  };
+
+  const nights = calculateNights();
+  const baseRate = stay?.room?.room_type?.price || 250;
+  const boardSurchargePerNight = booking.booking_type === "HB" ? 1500 : booking.booking_type === "FB" ? 3000 : 0;
+  const roomPrice = (baseRate + boardSurchargePerNight) * nights;
+
+  const servicesTotal = services.reduce((sum, s) => sum + (s.total_amount || 0), 0);
+  const tripsTotal = trips.reduce((sum, t) => sum + (t.total_amount || 0), 0);
+  const subtotal = roomPrice + servicesTotal + tripsTotal;
+  const grandTotal = subtotal * 1.15;
+
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-16">
       {/* Header Controls */}
@@ -120,7 +133,7 @@ export default function CustomerBookingDetailPage() {
           </div>
         </div>
 
-        {/* Guest & Room Details Grid */}
+        {/* Guest & Prominent Room Details Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 bg-[#F8F7F4] p-6 rounded-2xl border border-[#E5E2DC]">
           <div className="space-y-1 text-xs">
             <span className="text-slate-400 font-bold uppercase tracking-wider block">Guest Information</span>
@@ -131,12 +144,19 @@ export default function CustomerBookingDetailPage() {
             <div className="text-slate-600">{booking.customer?.contact_info}</div>
           </div>
 
-          <div className="space-y-1 text-xs">
-            <span className="text-slate-400 font-bold uppercase tracking-wider block">Stay Details</span>
-            <div className="font-bold text-sm text-[#1A202C]">
-              {stay?.room?.room_type?.type || "Luxury Suite"} (Room #{stay?.room_room_id || "Unassigned"})
+          <div className="space-y-1 text-xs border-t sm:border-t-0 sm:border-l sm:pl-6 border-slate-200 pt-4 sm:pt-0">
+            <span className="text-slate-400 font-bold uppercase tracking-wider block">Allocated Accommodation</span>
+            {/* Prominent Large Room Number Display */}
+            <div className="flex items-center gap-2 my-1">
+              <BedDouble className="h-6 w-6 text-[#A37836]" />
+              <span className="text-2xl font-black text-[#A37836]">
+                Room #{stay?.room_room_id || "Unassigned"}
+              </span>
             </div>
-            <div className="text-slate-600">
+            <div className="font-bold text-sm text-[#1A202C]">
+              {stay?.room?.room_type?.type || "Luxury Suite"}
+            </div>
+            <div className="text-slate-600 mt-2">
               Check-In: <strong>{stay ? formatDate(stay.check_in_date) : "Pending"}</strong>
             </div>
             <div className="text-slate-600">
@@ -161,11 +181,11 @@ export default function CustomerBookingDetailPage() {
             <tbody className="divide-y divide-slate-100">
               <tr>
                 <td className="p-3 font-semibold text-[#1A202C]">
-                  {stay?.room?.room_type?.type || "Room Stay"} Accommodation
+                  {stay?.room?.room_type?.type || "Room Stay"} ({nights} night{nights > 1 ? "s" : ""})
                 </td>
                 <td className="p-3 text-slate-500">Board Plan: {booking.booking_type}</td>
                 <td className="p-3 text-right font-bold text-[#1A202C]">
-                  {formatCurrency(stay?.room?.room_type?.price || 5000)}
+                  {formatCurrency(roomPrice)}
                 </td>
               </tr>
               {services.map((s) => (
@@ -176,32 +196,48 @@ export default function CustomerBookingDetailPage() {
                 </tr>
               ))}
               {trips.map((t) => (
-                <tr key={t.tb_id}>
+                <tr key={`${t.trip_trip_id}-${t.booking_booking_id}`}>
                   <td className="p-3 font-semibold text-[#1A202C]">{t.trip?.tour?.tour_name || "Excursion"}</td>
-                  <td className="p-3 text-slate-500">Trip Ticket #{t.tb_id}</td>
+                  <td className="p-3 text-slate-500">Trip #{t.trip_trip_id}</td>
                   <td className="p-3 text-right font-bold text-[#1A202C]">{formatCurrency(t.total_amount)}</td>
                 </tr>
               ))}
             </tbody>
+            <tfoot className="bg-[#F8F7F4] font-bold text-xs">
+              <tr className="border-t border-slate-200">
+                <td colSpan={2} className="p-3 text-slate-600 text-right">Subtotal:</td>
+                <td className="p-3 text-right text-[#1A202C]">{formatCurrency(subtotal)}</td>
+              </tr>
+              <tr>
+                <td colSpan={2} className="p-3 text-slate-600 text-right">VAT (15% Mauritius):</td>
+                <td className="p-3 text-right text-[#1A202C]">{formatCurrency(subtotal * 0.15)}</td>
+              </tr>
+              <tr className="text-sm bg-[#F4EFE6] text-[#A37836]">
+                <td colSpan={2} className="p-3 font-extrabold text-right">Grand Total Amount Due:</td>
+                <td className="p-3 text-right font-black text-base">{formatCurrency(grandTotal)}</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
 
         {/* Payments Summary */}
         <div className="space-y-3 pt-4 border-t border-slate-100">
           <h3 className="font-bold text-sm text-[#1A202C] uppercase tracking-wider flex items-center gap-2">
-            <CreditCard className="h-4 w-4 text-[#A37836]" /> Recorded Payments
+            <CreditCard className="h-4 w-4 text-[#A37836]" /> Recorded Payments & Transactions
           </h3>
           {payments.length === 0 ? (
             <p className="text-xs text-slate-400">No payment transaction records logged for this reservation.</p>
           ) : (
             <div className="space-y-2">
               {payments.map((p) => (
-                <div key={p.pay_id} className="flex justify-between items-center bg-[#F8F7F4] p-3 rounded-xl text-xs">
+                <div key={p.payment_id || p.pay_id} className="flex justify-between items-center bg-[#F8F7F4] p-3.5 rounded-xl text-xs border border-slate-100">
                   <div>
-                    <span className="font-bold text-[#1A202C]">Transaction #{p.pay_id}</span>
-                    <span className="text-slate-400 block">{formatDate(p.payment_date)} • {p.payment_method}</span>
+                    <span className="font-bold text-[#1A202C]">Transaction #{p.payment_id || p.pay_id}</span>
+                    <span className="text-slate-500 block">{formatDate(p.payment_date)} • Method: {p.payment_method || p.payment_type}</span>
                   </div>
-                  <div className="font-bold text-emerald-600">{formatCurrency(p.amount_paid)}</div>
+                  <div className="font-bold text-emerald-600 text-sm">
+                    {formatCurrency(p.payment_amount || p.amount_paid || 0)}
+                  </div>
                 </div>
               ))}
             </div>
