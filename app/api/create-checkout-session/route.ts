@@ -8,7 +8,7 @@ const stripe = new Stripe(stripeSecretKey);
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { roomId, roomTypeName, totalAmount, checkInDate, checkOutDate, boardType, guestInfo, services, tours } = body;
+    const { roomId, roomTypeName, totalAmount, checkInDate, checkOutDate, boardType, guestInfo, services, tours, pricingRule } = body;
 
     const origin = req.headers.get("origin") || "http://localhost:3000";
 
@@ -28,7 +28,9 @@ export async function POST(req: Request) {
             currency: "mur",
             product_data: {
               name: `Resort Stay - ${roomTypeName || "Luxury Suite"} (Room #${roomId})`,
-              description: `Check-in: ${checkInDate} | Check-out: ${checkOutDate} | Plan: ${boardType}`,
+              description: `Check-in: ${checkInDate} | Check-out: ${checkOutDate} | Plan: ${boardType}${
+                pricingRule ? ` | ${pricingRule.reason || "Special Rate"}` : ""
+              }`,
             },
             unit_amount: Math.round((totalAmount || 5000) * 100),
           },
@@ -48,6 +50,7 @@ export async function POST(req: Request) {
         guestLname: String(guestInfo?.lname || ""),
         services: JSON.stringify(services || []),
         tours: JSON.stringify(tours || []),
+        pricingRule: JSON.stringify(pricingRule || null),
       },
     });
 

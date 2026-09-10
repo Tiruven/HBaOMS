@@ -112,20 +112,46 @@ export default function RoomsPage() {
   }) => {
     setIsLoading(true);
     const now = new Date().toISOString();
+    const trimmedDesc = values.room_desc.trim();
+
+    // 1. Client-side duplicate check (case-insensitive & trimmed)
+    const isDuplicate = rooms.some((r) => {
+      if (selectedRoom && r.room_id === selectedRoom.room_id) return false;
+      return r.room_desc?.trim().toLowerCase() === trimmedDesc.toLowerCase();
+    });
+
+    if (isDuplicate) {
+      setIsLoading(false);
+      return {
+        success: false,
+        error: `A room with the name or description "${trimmedDesc}" already exists. Please provide a unique room name/number.`,
+      };
+    }
 
     if (selectedRoom) {
       // Update
       try {
-        await supabase
+        const { error } = await supabase
           .from("room")
           .update({
-            room_desc: values.room_desc,
+            room_desc: trimmedDesc,
             room_status: values.room_status,
             room_type_room_type_id: values.room_type_room_type_id,
             updated_by_: currentUserEmail,
             date_updated: now,
           })
           .eq("room_id", selectedRoom.room_id);
+
+        if (error) {
+          setIsLoading(false);
+          if (error.code === "23505") {
+            return {
+              success: false,
+              error: `A room with the name "${trimmedDesc}" already exists in the database.`,
+            };
+          }
+          return { success: false, error: error.message || "Failed to update room." };
+        }
 
         // Delete existing room_feature entries
         await supabase
@@ -141,8 +167,9 @@ export default function RoomsPage() {
           }));
           await supabase.from("room_feature").insert(featureInserts);
         }
-      } catch (err) {
-        console.error("Update room error:", err);
+      } catch (err: any) {
+        setIsLoading(false);
+        return { success: false, error: err.message || "Failed to update room." };
       }
     } else {
       // Create
@@ -151,7 +178,7 @@ export default function RoomsPage() {
           .from("room")
           .insert([
             {
-              room_desc: values.room_desc,
+              room_desc: trimmedDesc,
               room_status: values.room_status,
               room_type_room_type_id: values.room_type_room_type_id,
               created_by: currentUserEmail,
@@ -160,7 +187,16 @@ export default function RoomsPage() {
           ])
           .select();
 
-        if (error) throw error;
+        if (error) {
+          setIsLoading(false);
+          if (error.code === "23505") {
+            return {
+              success: false,
+              error: `A room with the name "${trimmedDesc}" already exists in the database.`,
+            };
+          }
+          return { success: false, error: error.message || "Failed to create room." };
+        }
 
         if (data && data[0] && values.feature_ids && values.feature_ids.length > 0) {
           const newRoomId = data[0].room_id;
@@ -170,14 +206,16 @@ export default function RoomsPage() {
           }));
           await supabase.from("room_feature").insert(featureInserts);
         }
-      } catch (err) {
-        console.error("Insert room error:", err);
+      } catch (err: any) {
+        setIsLoading(false);
+        return { success: false, error: err.message || "Failed to create room." };
       }
     }
 
     await fetchData();
     setIsLoading(false);
     setIsModalOpen(false);
+    return { success: true };
   };
 
   const handleConfirmDelete = async () => {

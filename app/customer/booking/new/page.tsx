@@ -5,7 +5,7 @@ import React, { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
-import { Room, Service, Tour, Customer } from "@/lib/types";
+import { Room, Service, Tour, Customer, PricingRule } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { StepIndicator } from "@/components/customer/StepIndicator";
 import { PricingBadge } from "@/components/customer/PricingBadge";
@@ -107,6 +107,7 @@ export default function BookingWizardPage() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [tours, setTours] = useState<Tour[]>([]);
+  const [pricingRules, setPricingRules] = useState<PricingRule[]>([]);
 
   // Wizard Selections
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
@@ -161,10 +162,11 @@ export default function BookingWizardPage() {
     async function loadCatalog() {
       setLoadingData(true);
       try {
-        const [rRes, sRes, tRes] = await Promise.all([
+        const [rRes, sRes, tRes, prRes] = await Promise.all([
           supabase.from("room").select("*, room_type(*), room_feature(feature(*))").eq("room_status", "Available"),
           supabase.from("service").select("*"),
           supabase.from("tour").select("*"),
+          supabase.from("pricing_rule").select("*"),
         ]);
 
         if (rRes.data) {
@@ -178,6 +180,7 @@ export default function BookingWizardPage() {
         }
         if (sRes.data) setServices(sRes.data);
         if (tRes.data) setTours(tRes.data);
+        if (prRes.data) setPricingRules(prRes.data);
 
         // Pre-fill dates
         const todayStr = new Date().toISOString().split("T")[0];
@@ -207,7 +210,20 @@ export default function BookingWizardPage() {
     }
   }, [preselectedRoomId]);
 
-  // Calculations
+  // Helper to match active pricing rule with room and stay dates
+  const getRuleForRoom = (room: Room | null, inDate?: string, outDate?: string) => {
+    if (!room || !room.room_type_room_type_id) return null;
+    const stayIn = inDate || checkInDate || new Date().toISOString().split("T")[0];
+    const stayOut = outDate || checkOutDate || stayIn;
+    return pricingRules.find((p) => {
+      if (p.room_type_room_type_id !== room.room_type_room_type_id) return false;
+      const ruleStart = p.start_date.split("T")[0];
+      const ruleEnd = p.end_date.split("T")[0];
+      return stayIn <= ruleEnd && stayOut >= ruleStart;
+    });
+  };
+
+  // Calculations with dynamic Pricing Rules
   const calculateNights = () => {
     if (!checkInDate || !checkOutDate) return 1;
     const d1 = new Date(checkInDate);
@@ -218,10 +234,15 @@ export default function BookingWizardPage() {
 
   const nights = calculateNights();
   const roomBasePrice = selectedRoom?.room_type?.price || 5000;
+  const activePricingRule = getRuleForRoom(selectedRoom, checkInDate, checkOutDate);
+  const rateOverridePercent = activePricingRule ? activePricingRule.rate_override : 0;
+  const effectiveRoomRate = activePricingRule
+    ? Math.round(roomBasePrice * (1 + rateOverridePercent / 100))
+    : roomBasePrice;
 
   // Board Surcharges per night
   const boardSurchargePerNight = boardType === "HB" ? 1500 : boardType === "FB" ? 3000 : 0;
-  const totalRoomCost = (roomBasePrice + boardSurchargePerNight) * nights;
+  const totalRoomCost = (effectiveRoomRate + boardSurchargePerNight) * nights;
 
   const totalServicesCost = selectedServiceIds.reduce((sum, sId) => {
     const srv = services.find((s) => s.service_id === sId);
@@ -335,6 +356,15 @@ export default function BookingWizardPage() {
           },
           services: selectedServiceIds,
           tours: selectedTourIds,
+          pricingRule: activePricingRule
+            ? {
+                pr_id: activePricingRule.pr_id,
+                reason: activePricingRule.reason,
+                rate_override: activePricingRule.rate_override,
+                basePrice: roomBasePrice,
+                effectivePrice: effectiveRoomRate,
+              }
+            : null,
         }),
       });
 
@@ -416,6 +446,7 @@ export default function BookingWizardPage() {
               const isSelected = selectedRoom?.room_id === room.room_id;
               const typeName = room.room_type?.type || "Suite";
               const price = room.room_type?.price || 5000;
+              const rule = getRuleForRoom(room);
 
               return (
                 <div
@@ -436,8 +467,11 @@ export default function BookingWizardPage() {
                         <h3 className="font-bold text-lg text-[#1A202C] mt-1">Room #{room.room_id}</h3>
                       </div>
                       <div className="text-right">
-                        <span className="text-lg font-extrabold text-[#1A202C]">{formatCurrency(price)}</span>
-                        <span className="text-[10px] text-slate-400 block">/ night</span>
+                        <PricingBadge
+                          basePrice={price}
+                          rateOverride={rule?.rate_override}
+                          reason={rule?.reason}
+                        />
                       </div>
                     </div>
                     <p className="text-xs text-slate-500 leading-relaxed">
@@ -495,6 +529,26 @@ export default function BookingWizardPage() {
             <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl text-xs text-emerald-800 font-semibold flex items-center gap-2">
               <CheckCircle className="h-4 w-4 text-emerald-600" />
               Room #{selectedRoom?.room_id} has no existing reservations for upcoming dates!
+            </div>
+          )}
+
+          {/* Active Pricing Rule Callout */}
+          {activePricingRule && (
+            <div className="bg-amber-50/80 border border-amber-200 p-4 rounded-2xl flex items-center justify-between text-xs gap-3">
+              <div className="flex items-center gap-2.5">
+                <Sparkles className="h-5 w-5 text-amber-600 shrink-0" />
+                <div>
+                  <div className="font-bold text-amber-900 flex items-center gap-1.5">
+                    <span>{activePricingRule.reason || "Special Rate Applied"}</span>
+                    <Badge className="bg-amber-600 text-white text-[10px] font-bold py-0">
+                      {activePricingRule.rate_override > 0 ? `+${activePricingRule.rate_override}% Surcharge` : `${activePricingRule.rate_override}% Discount`}
+                    </Badge>
+                  </div>
+                  <span className="text-amber-800 text-[11px] block mt-0.5">
+                    Seasonal rate override applies for your stay window: <strong>{formatCurrency(effectiveRoomRate)}</strong> / night (Standard: <span className="line-through">{formatCurrency(roomBasePrice)}</span>).
+                  </span>
+                </div>
+              </div>
             </div>
           )}
 
@@ -799,12 +853,19 @@ export default function BookingWizardPage() {
             </h3>
 
             <div className="space-y-2 text-sm border-b border-slate-200 pb-4">
-              <div className="flex justify-between">
-                <span className="text-slate-600">
-                  {selectedRoom?.room_type?.type} Room #{selectedRoom?.room_id} ({nights} nights)
-                </span>
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="text-slate-600 block">
+                    {selectedRoom?.room_type?.type} Room #{selectedRoom?.room_id} ({nights} {nights === 1 ? "night" : "nights"} @ {formatCurrency(effectiveRoomRate)}/nt)
+                  </span>
+                  {activePricingRule && (
+                    <span className="text-[11px] text-amber-700 font-semibold block">
+                      Seasonal {activePricingRule.rate_override > 0 ? `+${activePricingRule.rate_override}%` : `${activePricingRule.rate_override}%`} ({activePricingRule.reason || "Pricing Rule"}) applied to base rate ({formatCurrency(roomBasePrice)}/nt)
+                    </span>
+                  )}
+                </div>
                 <span className="font-bold text-[#1A202C]">
-                  {formatCurrency((selectedRoom?.room_type?.price || 5000) * nights)}
+                  {formatCurrency(effectiveRoomRate * nights)}
                 </span>
               </div>
 

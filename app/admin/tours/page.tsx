@@ -87,14 +87,29 @@ export default function ToursPage() {
   }) => {
     setIsLoading(true);
     const now = new Date().toISOString();
+    const trimmedName = values.tour_name.trim();
+
+    // 1. Client-side duplicate check (case-insensitive & trimmed)
+    const isDuplicate = tours.some((t) => {
+      if (selectedTour && t.tour_id === selectedTour.tour_id) return false;
+      return t.tour_name.trim().toLowerCase() === trimmedName.toLowerCase();
+    });
+
+    if (isDuplicate) {
+      setIsLoading(false);
+      return {
+        success: false,
+        error: `A tour with the name "${trimmedName}" already exists. Please choose a unique name.`,
+      };
+    }
 
     if (selectedTour) {
       // Update
       try {
-        await supabase
+        const { error } = await supabase
           .from("tour")
           .update({
-            tour_name: values.tour_name,
+            tour_name: trimmedName,
             tour_desc: values.tour_desc,
             adult_price: values.adult_price,
             child_price: values.child_price,
@@ -103,15 +118,27 @@ export default function ToursPage() {
             date_updated: now,
           })
           .eq("tour_id", selectedTour.tour_id);
-      } catch (err) {
-        console.error("Update tour error:", err);
+
+        if (error) {
+          setIsLoading(false);
+          if (error.code === "23505") {
+            return {
+              success: false,
+              error: `A tour with the name "${trimmedName}" already exists in the database.`,
+            };
+          }
+          return { success: false, error: error.message || "Failed to update tour." };
+        }
+      } catch (err: any) {
+        setIsLoading(false);
+        return { success: false, error: err.message || "Failed to update tour." };
       }
     } else {
       // Create
       try {
-        await supabase.from("tour").insert([
+        const { error } = await supabase.from("tour").insert([
           {
-            tour_name: values.tour_name,
+            tour_name: trimmedName,
             tour_desc: values.tour_desc,
             adult_price: values.adult_price,
             child_price: values.child_price,
@@ -120,14 +147,27 @@ export default function ToursPage() {
             date_created: now,
           },
         ]);
-      } catch (err) {
-        console.error("Insert tour error:", err);
+
+        if (error) {
+          setIsLoading(false);
+          if (error.code === "23505") {
+            return {
+              success: false,
+              error: `A tour with the name "${trimmedName}" already exists in the database.`,
+            };
+          }
+          return { success: false, error: error.message || "Failed to create tour." };
+        }
+      } catch (err: any) {
+        setIsLoading(false);
+        return { success: false, error: err.message || "Failed to create tour." };
       }
     }
 
     await fetchTours();
     setIsLoading(false);
     setIsModalOpen(false);
+    return { success: true };
   };
 
   const handleConfirmDelete = async () => {

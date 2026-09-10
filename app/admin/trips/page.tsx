@@ -69,6 +69,25 @@ export default function TripsPage() {
     }
   };
 
+  const extractTime = (timeStr: string) => {
+    if (!timeStr) return "09:00";
+    if (timeStr.includes("T")) {
+      return timeStr.split("T")[1].slice(0, 5);
+    }
+    return timeStr.slice(0, 5);
+  };
+
+  const formatTimeDisplay = (timeStr: string) => {
+    if (!timeStr) return "";
+    const timeOnly = timeStr.includes("T") ? timeStr.split("T")[1].slice(0, 5) : timeStr.slice(0, 5);
+    const [hoursStr, minsStr] = timeOnly.split(":");
+    const hours = parseInt(hoursStr, 10);
+    if (isNaN(hours)) return timeStr;
+    const ampm = hours >= 12 ? "PM" : "AM";
+    const formattedHours = hours % 12 === 0 ? 12 : hours % 12;
+    return `${String(formattedHours).padStart(2, "0")}:${minsStr || "00"} ${ampm}`;
+  };
+
   const handleOpenAdd = () => {
     setSelectedTrip(null);
     setTourId(tours.length > 0 ? String(tours[0].tour_id) : "");
@@ -83,9 +102,9 @@ export default function TripsPage() {
   const handleOpenEdit = (t: Trip) => {
     setSelectedTrip(t);
     setTourId(String(t.tour_tour_id));
-    setTripDate(t.trip_date.split("T")[0]);
-    setStartTime(t.start_time);
-    setReturnTime(t.return_time);
+    setTripDate(t.trip_date ? t.trip_date.split("T")[0] : new Date().toISOString().split("T")[0]);
+    setStartTime(extractTime(t.start_time));
+    setReturnTime(extractTime(t.return_time));
     setTripStatus(t.trip_status);
     setFormError("");
     setIsModalOpen(true);
@@ -113,11 +132,16 @@ export default function TripsPage() {
     const currentUserEmail = user?.primaryEmailAddress?.emailAddress || "admin@hbaoms.com";
     const now = new Date().toISOString();
 
+    const tripDateClean = tripDate.includes("T") ? tripDate.split("T")[0] : tripDate;
+    // Format start_time and return_time as valid ISO timestamps for PostgreSQL TIMESTAMP columns
+    const startTimeIso = `${tripDateClean}T${startTime.slice(0, 5)}:00.000Z`;
+    const returnTimeIso = `${tripDateClean}T${returnTime.slice(0, 5)}:00.000Z`;
+
     const payload = {
       tour_tour_id: Number(tourId),
-      trip_date: tripDate,
-      start_time: startTime,
-      return_time: returnTime,
+      trip_date: `${tripDateClean}T00:00:00.000Z`,
+      start_time: startTimeIso,
+      return_time: returnTimeIso,
       trip_status: tripStatus,
       updated_by_: currentUserEmail,
       date_updated: now,
@@ -236,8 +260,8 @@ export default function TripsPage() {
                       <td className="px-4 py-3 font-mono font-bold text-navy-900">#{t.trip_id}</td>
                       <td className="px-4 py-3 font-semibold text-slate-800">{t.tour?.tour_name || "Tour Excursion"}</td>
                       <td className="px-4 py-3 text-slate-600">{formatDate(t.trip_date)}</td>
-                      <td className="px-4 py-3 text-xs text-slate-600">
-                        {t.start_time} - {t.return_time}
+                      <td className="px-4 py-3 text-xs font-medium text-slate-700">
+                        {formatTimeDisplay(t.start_time)} – {formatTimeDisplay(t.return_time)}
                       </td>
                       <td className="px-4 py-3">{getStatusBadge(t.trip_status)}</td>
                       <td className="px-4 py-3 text-right space-x-1">
@@ -265,7 +289,7 @@ export default function TripsPage() {
                 <div className="font-bold text-navy-900">{t.tour?.tour_name}</div>
                 <div className="text-xs text-slate-600">
                   <div><strong>Date:</strong> {formatDate(t.trip_date)}</div>
-                  <div><strong>Time:</strong> {t.start_time} - {t.return_time}</div>
+                  <div><strong>Time:</strong> {formatTimeDisplay(t.start_time)} – {formatTimeDisplay(t.return_time)}</div>
                 </div>
                 <div className="pt-2 border-t border-slate-100 flex justify-end gap-2">
                   <Button variant="outline" size="sm" onClick={() => handleOpenEdit(t)}>Edit</Button>

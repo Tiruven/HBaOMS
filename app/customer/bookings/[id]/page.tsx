@@ -5,7 +5,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { Booking, CheckInOut, Payment, ServiceBooking, TripBooking } from "@/lib/types";
+import { Booking, CheckInOut, Payment, ServiceBooking, TripBooking, PricingRule } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,7 @@ export default function CustomerBookingDetailPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [services, setServices] = useState<ServiceBooking[]>([]);
   const [trips, setTrips] = useState<TripBooking[]>([]);
+  const [pricingRules, setPricingRules] = useState<PricingRule[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
@@ -35,12 +36,13 @@ export default function CustomerBookingDetailPage() {
       setLoading(true);
       try {
         const idNum = Number(bookingId);
-        const [bRes, cioRes, pRes, sbRes, tbRes] = await Promise.all([
+        const [bRes, cioRes, pRes, sbRes, tbRes, prRes] = await Promise.all([
           supabase.from("booking").select("*, customer(*)").eq("booking_id", idNum).single(),
           supabase.from("check_in_out").select("*, room(*, room_type(*))").eq("booking_booking_id", idNum).single(),
           supabase.from("payment").select("*").eq("booking_booking_id", idNum),
           supabase.from("service_booking").select("*, service(*)").eq("booking_booking_id", idNum),
           supabase.from("trip_booking").select("*, trip(*, tour(*))").eq("booking_booking_id", idNum),
+          supabase.from("pricing_rule").select("*"),
         ]);
 
         if (bRes.data) setBooking(bRes.data);
@@ -48,6 +50,7 @@ export default function CustomerBookingDetailPage() {
         if (pRes.data) setPayments(pRes.data);
         if (sbRes.data) setServices(sbRes.data);
         if (tbRes.data) setTrips(tbRes.data);
+        if (prRes.data) setPricingRules(prRes.data);
       } catch (err) {
         console.error("Fetch booking detail error:", err);
       } finally {
@@ -91,7 +94,17 @@ export default function CustomerBookingDetailPage() {
   };
 
   const nights = calculateNights();
-  const baseRate = stay?.room?.room_type?.price || 250;
+  const rawBaseRate = stay?.room?.room_type?.price || 250;
+  const activeRule = pricingRules.find((p) => {
+    if (!stay?.room?.room_type_room_type_id || p.room_type_room_type_id !== stay.room.room_type_room_type_id) return false;
+    const ruleStart = p.start_date.split("T")[0];
+    const ruleEnd = p.end_date.split("T")[0];
+    const stayIn = stay.check_in_date ? stay.check_in_date.split("T")[0] : "";
+    const stayOut = stay.check_out_date ? stay.check_out_date.split("T")[0] : "";
+    return stayIn <= ruleEnd && stayOut >= ruleStart;
+  });
+
+  const baseRate = activeRule ? Math.round(rawBaseRate * (1 + activeRule.rate_override / 100)) : rawBaseRate;
   const boardSurchargePerNight = booking.booking_type === "HB" ? 1500 : booking.booking_type === "FB" ? 3000 : 0;
   const roomPrice = (baseRate + boardSurchargePerNight) * nights;
 
@@ -181,7 +194,12 @@ export default function CustomerBookingDetailPage() {
             <tbody className="divide-y divide-slate-100">
               <tr>
                 <td className="p-3 font-semibold text-[#1A202C]">
-                  {stay?.room?.room_type?.type || "Room Stay"} ({nights} night{nights > 1 ? "s" : ""})
+                  <div>{stay?.room?.room_type?.type || "Room Stay"} ({nights} night{nights > 1 ? "s" : ""})</div>
+                  {activeRule && (
+                    <div className="text-[10px] text-amber-700 font-normal">
+                      Seasonal {activeRule.rate_override > 0 ? `+${activeRule.rate_override}%` : `${activeRule.rate_override}%`} ({activeRule.reason}) applied ({formatCurrency(baseRate)}/nt)
+                    </div>
+                  )}
                 </td>
                 <td className="p-3 text-slate-500">Board Plan: {booking.booking_type}</td>
                 <td className="p-3 text-right font-bold text-[#1A202C]">

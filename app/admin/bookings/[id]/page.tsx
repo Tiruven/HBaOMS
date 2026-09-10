@@ -5,7 +5,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { Booking, CheckInOut, Payment, ServiceBooking, TripBooking } from "@/lib/types";
+import { Booking, CheckInOut, Payment, ServiceBooking, TripBooking, PricingRule } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +38,7 @@ export default function AdminBookingDetailPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [services, setServices] = useState<ServiceBooking[]>([]);
   const [trips, setTrips] = useState<TripBooking[]>([]);
+  const [pricingRules, setPricingRules] = useState<PricingRule[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
@@ -46,12 +47,13 @@ export default function AdminBookingDetailPage() {
       setLoading(true);
       try {
         const idNum = Number(bookingId);
-        const [bRes, cioRes, pRes, sbRes, tbRes] = await Promise.all([
+        const [bRes, cioRes, pRes, sbRes, tbRes, prRes] = await Promise.all([
           supabase.from("booking").select("*, customer(*)").eq("booking_id", idNum).single(),
           supabase.from("check_in_out").select("*, room(*, room_type(*))").eq("booking_booking_id", idNum).maybeSingle(),
           supabase.from("payment").select("*").eq("booking_booking_id", idNum),
           supabase.from("service_booking").select("*, service(*)").eq("booking_booking_id", idNum),
           supabase.from("trip_booking").select("*, trip(*, tour(*))").eq("booking_booking_id", idNum),
+          supabase.from("pricing_rule").select("*"),
         ]);
 
         if (bRes.data) setBooking(bRes.data);
@@ -59,6 +61,7 @@ export default function AdminBookingDetailPage() {
         if (pRes.data) setPayments(pRes.data);
         if (sbRes.data) setServices(sbRes.data);
         if (tbRes.data) setTrips(tbRes.data);
+        if (prRes.data) setPricingRules(prRes.data);
       } catch (err) {
         console.error("Error loading admin booking detail:", err);
       } finally {
@@ -111,7 +114,17 @@ export default function AdminBookingDetailPage() {
   };
 
   const nights = calculateNights();
-  const baseRate = stay?.room?.room_type?.price || 250;
+  const rawBaseRate = stay?.room?.room_type?.price || 250;
+  const activeRule = pricingRules.find((p) => {
+    if (!stay?.room?.room_type_room_type_id || p.room_type_room_type_id !== stay.room.room_type_room_type_id) return false;
+    const ruleStart = p.start_date.split("T")[0];
+    const ruleEnd = p.end_date.split("T")[0];
+    const stayIn = stay.check_in_date ? stay.check_in_date.split("T")[0] : "";
+    const stayOut = stay.check_out_date ? stay.check_out_date.split("T")[0] : "";
+    return stayIn <= ruleEnd && stayOut >= ruleStart;
+  });
+
+  const baseRate = activeRule ? Math.round(rawBaseRate * (1 + activeRule.rate_override / 100)) : rawBaseRate;
   const boardSurchargePerNight = booking.booking_type === "HB" ? 1500 : booking.booking_type === "FB" ? 3000 : 0;
   const roomPrice = (baseRate + boardSurchargePerNight) * nights;
 
@@ -282,7 +295,14 @@ export default function AdminBookingDetailPage() {
             </h3>
             <div className="space-y-2 text-xs">
               <div className="flex justify-between text-slate-600">
-                <span>Room Stay:</span>
+                <div>
+                  <span>Room Stay ({nights}nt @ {formatCurrency(baseRate)}):</span>
+                  {activeRule && (
+                    <span className="block text-[10px] text-amber-700">
+                      Seasonal {activeRule.rate_override > 0 ? `+${activeRule.rate_override}%` : `${activeRule.rate_override}%`} ({activeRule.reason}) applied
+                    </span>
+                  )}
+                </div>
                 <span className="font-semibold text-slate-800">{formatCurrency(roomPrice)}</span>
               </div>
               <div className="flex justify-between text-slate-600">

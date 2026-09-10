@@ -23,10 +23,10 @@ import {
 } from "@/components/ui/select";
 import { Room, RoomType, Feature } from "@/lib/types";
 import { AuditFieldsView } from "@/components/shared/AuditFields";
-import { Loader2 } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
 
 const roomSchema = z.object({
-  room_desc: z.string().min(1, "Room description/number is required").max(100, "Max 100 characters"),
+  room_desc: z.string().trim().min(1, "Room description/number is required").max(100, "Max 100 characters"),
   room_status: z.enum(["Available", "Maintenance"], {
     required_error: "Please select a room status",
   }),
@@ -39,7 +39,7 @@ type RoomFormValues = z.infer<typeof roomSchema>;
 interface RoomModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (values: RoomFormValues) => Promise<void>;
+  onSubmit: (values: RoomFormValues) => Promise<{ success: boolean; error?: string } | void>;
   initialData?: Room | null;
   roomTypes: RoomType[];
   features: Feature[];
@@ -55,6 +55,8 @@ export const RoomModal: React.FC<RoomModalProps> = ({
   features,
   isLoading = false,
 }) => {
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
+
   const {
     register,
     handleSubmit,
@@ -72,6 +74,7 @@ export const RoomModal: React.FC<RoomModalProps> = ({
   });
 
   useEffect(() => {
+    setSubmitError(null);
     if (initialData) {
       const selectedFids =
         initialData.room_feature
@@ -94,8 +97,17 @@ export const RoomModal: React.FC<RoomModalProps> = ({
   }, [initialData, roomTypes, reset, isOpen]);
 
   const handleFormSubmit = async (data: RoomFormValues) => {
-    await onSubmit(data);
-    onClose();
+    setSubmitError(null);
+    try {
+      const result = await onSubmit(data);
+      if (result && !result.success) {
+        setSubmitError(result.error || "Failed to save room.");
+        return;
+      }
+      onClose();
+    } catch (err: any) {
+      setSubmitError(err.message || "Failed to save room.");
+    }
   };
 
   return (
@@ -106,6 +118,13 @@ export const RoomModal: React.FC<RoomModalProps> = ({
             {initialData ? "Edit Room Details" : "Add New Guest Room"}
           </DialogTitle>
         </DialogHeader>
+
+        {submitError && (
+          <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs font-semibold">
+            <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+            <span>{submitError}</span>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4 py-2">
           <div className="space-y-2">

@@ -16,10 +16,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RoomType } from "@/lib/types";
 import { AuditFieldsView } from "@/components/shared/AuditFields";
-import { Loader2 } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
 
 const roomTypeSchema = z.object({
-  type: z.string().min(1, "Room type is required").max(15, "Max 15 characters"),
+  type: z.string().trim().min(1, "Room type is required").max(15, "Max 15 characters"),
   price: z.coerce.number().positive("Price must be greater than 0"),
   size: z.coerce.number().positive("Size must be greater than 0"),
 });
@@ -29,7 +29,7 @@ type RoomTypeFormValues = z.infer<typeof roomTypeSchema>;
 interface RoomTypeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (values: RoomTypeFormValues) => Promise<void>;
+  onSubmit: (values: RoomTypeFormValues) => Promise<{ success: boolean; error?: string } | void>;
   initialData?: RoomType | null;
   isLoading?: boolean;
 }
@@ -41,6 +41,8 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
   initialData,
   isLoading = false,
 }) => {
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
+
   const {
     register,
     handleSubmit,
@@ -56,6 +58,7 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
   });
 
   useEffect(() => {
+    setSubmitError(null);
     if (initialData) {
       reset({
         type: initialData.type,
@@ -72,8 +75,17 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
   }, [initialData, reset, isOpen]);
 
   const handleFormSubmit = async (data: RoomTypeFormValues) => {
-    await onSubmit(data);
-    onClose();
+    setSubmitError(null);
+    try {
+      const result = await onSubmit(data);
+      if (result && !result.success) {
+        setSubmitError(result.error || "Failed to save room type.");
+        return;
+      }
+      onClose();
+    } catch (err: any) {
+      setSubmitError(err.message || "Failed to save room type.");
+    }
   };
 
   return (
@@ -84,6 +96,13 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
             {initialData ? "Edit Room Type" : "Add New Room Type"}
           </DialogTitle>
         </DialogHeader>
+
+        {submitError && (
+          <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs font-semibold">
+            <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+            <span>{submitError}</span>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4 py-2">
           <div className="space-y-2">

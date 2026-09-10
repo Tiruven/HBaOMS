@@ -91,43 +91,83 @@ export default function ServicesPage() {
   }) => {
     setIsLoading(true);
     const now = new Date().toISOString();
+    const trimmedName = values.service_name.trim();
+
+    // 1. Client-side duplicate check (case-insensitive & trimmed)
+    const isDuplicate = services.some((s) => {
+      if (selectedService && s.service_id === selectedService.service_id) return false;
+      return s.service_name.trim().toLowerCase() === trimmedName.toLowerCase();
+    });
+
+    if (isDuplicate) {
+      setIsLoading(false);
+      return {
+        success: false,
+        error: `A service with the name "${trimmedName}" already exists. Please choose a unique name.`,
+      };
+    }
 
     if (selectedService) {
       // Update
       try {
-        await supabase
+        const { error } = await supabase
           .from("service")
           .update({
-            service_name: values.service_name,
+            service_name: trimmedName,
             service_desc: values.service_desc,
             price: values.price,
             updated_by_: currentUserEmail,
             date_updated: now,
           })
           .eq("service_id", selectedService.service_id);
-      } catch (err) {
-        console.error("Update service error:", err);
+
+        if (error) {
+          setIsLoading(false);
+          if (error.code === "23505") {
+            return {
+              success: false,
+              error: `A service with the name "${trimmedName}" already exists in the database.`,
+            };
+          }
+          return { success: false, error: error.message || "Failed to update service." };
+        }
+      } catch (err: any) {
+        setIsLoading(false);
+        return { success: false, error: err.message || "Failed to update service." };
       }
     } else {
       // Create
       try {
-        await supabase.from("service").insert([
+        const { error } = await supabase.from("service").insert([
           {
-            service_name: values.service_name,
+            service_name: trimmedName,
             service_desc: values.service_desc,
             price: values.price,
             created_by: currentUserEmail,
             date_created: now,
           },
         ]);
-      } catch (err) {
-        console.error("Insert service error:", err);
+
+        if (error) {
+          setIsLoading(false);
+          if (error.code === "23505") {
+            return {
+              success: false,
+              error: `A service with the name "${trimmedName}" already exists in the database.`,
+            };
+          }
+          return { success: false, error: error.message || "Failed to create service." };
+        }
+      } catch (err: any) {
+        setIsLoading(false);
+        return { success: false, error: err.message || "Failed to create service." };
       }
     }
 
     await fetchServices();
     setIsLoading(false);
     setIsModalOpen(false);
+    return { success: true };
   };
 
   const handleConfirmDelete = async () => {

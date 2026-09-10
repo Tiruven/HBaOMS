@@ -125,7 +125,8 @@ export interface Notification extends AuditFields {
 }
 
 export interface MaintenanceRequest extends AuditFields {
-  mr_id: number;
+  maintenance_id: number;
+  mr_id?: number;
   request_date: string;
   mr_desc: string;
   priority: "Low" | "Medium" | "High" | "Urgent";

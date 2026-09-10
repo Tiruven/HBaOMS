@@ -16,10 +16,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tour } from "@/lib/types";
 import { AuditFieldsView } from "@/components/shared/AuditFields";
-import { Loader2 } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
 
 const tourSchema = z.object({
-  tour_name: z.string().min(1, "Tour name is required").max(30, "Max 30 characters"),
+  tour_name: z.string().trim().min(1, "Tour name is required").max(30, "Max 30 characters"),
   tour_desc: z.string().max(100, "Max 100 characters").optional().nullable(),
   adult_price: z.coerce.number().positive("Adult price must be greater than 0"),
   child_price: z.coerce.number().positive("Child price must be greater than 0"),
@@ -31,7 +31,7 @@ type TourFormValues = z.infer<typeof tourSchema>;
 interface TourModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (values: TourFormValues) => Promise<void>;
+  onSubmit: (values: TourFormValues) => Promise<{ success: boolean; error?: string } | void>;
   initialData?: Tour | null;
   isLoading?: boolean;
 }
@@ -43,6 +43,8 @@ export const TourModal: React.FC<TourModalProps> = ({
   initialData,
   isLoading = false,
 }) => {
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
+
   const {
     register,
     handleSubmit,
@@ -60,6 +62,7 @@ export const TourModal: React.FC<TourModalProps> = ({
   });
 
   useEffect(() => {
+    setSubmitError(null);
     if (initialData) {
       reset({
         tour_name: initialData.tour_name,
@@ -80,8 +83,17 @@ export const TourModal: React.FC<TourModalProps> = ({
   }, [initialData, reset, isOpen]);
 
   const handleFormSubmit = async (data: TourFormValues) => {
-    await onSubmit(data);
-    onClose();
+    setSubmitError(null);
+    try {
+      const result = await onSubmit(data);
+      if (result && !result.success) {
+        setSubmitError(result.error || "Failed to save tour.");
+        return;
+      }
+      onClose();
+    } catch (err: any) {
+      setSubmitError(err.message || "Failed to save tour.");
+    }
   };
 
   return (
@@ -92,6 +104,13 @@ export const TourModal: React.FC<TourModalProps> = ({
             {initialData ? "Edit Excursion Tour" : "Add New Excursion Tour"}
           </DialogTitle>
         </DialogHeader>
+
+        {submitError && (
+          <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs font-semibold">
+            <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+            <span>{submitError}</span>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4 py-2">
           <div className="grid grid-cols-2 gap-4">

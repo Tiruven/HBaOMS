@@ -87,43 +87,83 @@ export default function RoomTypesPage() {
   const handleSubmitModal = async (values: { type: string; price: number; size: number }) => {
     setIsLoading(true);
     const now = new Date().toISOString();
+    const trimmedType = values.type.trim();
+
+    // 1. Client-side duplicate name check (case-insensitive)
+    const isDuplicate = roomTypes.some((rt) => {
+      if (selectedRoomType && rt.room_type_id === selectedRoomType.room_type_id) return false;
+      return rt.type.trim().toLowerCase() === trimmedType.toLowerCase();
+    });
+
+    if (isDuplicate) {
+      setIsLoading(false);
+      return {
+        success: false,
+        error: `A room type with the name "${trimmedType}" already exists. Please choose a unique name.`,
+      };
+    }
 
     if (selectedRoomType) {
       // Update
       try {
-        await supabase
+        const { error } = await supabase
           .from("room_type")
           .update({
-            type: values.type,
+            type: trimmedType,
             price: values.price,
             size: values.size,
             updated_by_: currentUserEmail,
             date_updated: now,
           })
           .eq("room_type_id", selectedRoomType.room_type_id);
-      } catch (err) {
-        console.error("Update room_type error:", err);
+
+        if (error) {
+          setIsLoading(false);
+          if (error.code === "23505") {
+            return {
+              success: false,
+              error: `A room type with the name "${trimmedType}" already exists in the database.`,
+            };
+          }
+          return { success: false, error: error.message || "Failed to update room type." };
+        }
+      } catch (err: any) {
+        setIsLoading(false);
+        return { success: false, error: err.message || "Failed to update room type." };
       }
     } else {
       // Create
       try {
-        await supabase.from("room_type").insert([
+        const { error } = await supabase.from("room_type").insert([
           {
-            type: values.type,
+            type: trimmedType,
             price: values.price,
             size: values.size,
             created_by: currentUserEmail,
             date_created: now,
           },
         ]);
-      } catch (err) {
-        console.error("Insert room_type error:", err);
+
+        if (error) {
+          setIsLoading(false);
+          if (error.code === "23505") {
+            return {
+              success: false,
+              error: `A room type with the name "${trimmedType}" already exists in the database.`,
+            };
+          }
+          return { success: false, error: error.message || "Failed to create room type." };
+        }
+      } catch (err: any) {
+        setIsLoading(false);
+        return { success: false, error: err.message || "Failed to create room type." };
       }
     }
 
     await fetchRoomTypes();
     setIsLoading(false);
     setIsModalOpen(false);
+    return { success: true };
   };
 
   const handleConfirmDelete = async () => {

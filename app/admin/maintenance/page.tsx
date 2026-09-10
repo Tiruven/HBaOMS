@@ -57,11 +57,15 @@ export default function MaintenancePage() {
     setLoading(true);
     try {
       const [mRes, rRes] = await Promise.all([
-        supabase.from("maintenance_request").select("*, room(*)").order("mr_id", { ascending: false }),
+        supabase.from("maintenance_request").select("*, room(*)").order("maintenance_id", { ascending: false }),
         supabase.from("room").select("*").order("room_id", { ascending: true }),
       ]);
 
-      if (mRes.data) setRequests(mRes.data);
+      if (mRes.error) {
+        console.error("Fetch maintenance error:", mRes.error);
+      } else if (mRes.data) {
+        setRequests(mRes.data);
+      }
       if (rRes.data) setRooms(rRes.data);
     } catch (err) {
       console.error("Fetch maintenance error:", err);
@@ -87,7 +91,7 @@ export default function MaintenancePage() {
     setMrDesc(mr.mr_desc || "");
     setPriority(mr.priority);
     setRequestStatus(mr.request_status);
-    setRequestDate(mr.request_date.split("T")[0]);
+    setRequestDate(mr.request_date ? mr.request_date.split("T")[0] : new Date().toISOString().split("T")[0]);
     setFormError("");
     setIsModalOpen(true);
   };
@@ -97,7 +101,7 @@ export default function MaintenancePage() {
     setIsDeleteOpen(true);
   };
 
-  const handleInlineStatusChange = async (mr_id: number, newStatus: "Open" | "In Progress" | "Resolved") => {
+  const handleInlineStatusChange = async (id: number, newStatus: "Open" | "In Progress" | "Resolved") => {
     try {
       const currentUserEmail = user?.primaryEmailAddress?.emailAddress || "admin@hbaoms.com";
       const { error } = await supabase
@@ -107,7 +111,7 @@ export default function MaintenancePage() {
           updated_by_: currentUserEmail,
           date_updated: new Date().toISOString(),
         })
-        .eq("mr_id", mr_id);
+        .eq("maintenance_id", id);
 
       if (error) throw error;
       await fetchData();
@@ -128,9 +132,11 @@ export default function MaintenancePage() {
     setIsSaving(true);
     const currentUserEmail = user?.primaryEmailAddress?.emailAddress || "admin@hbaoms.com";
     const now = new Date().toISOString();
+    const reqDateClean = requestDate.includes("T") ? requestDate.split("T")[0] : requestDate;
 
     try {
       if (selectedMR) {
+        const id = selectedMR.maintenance_id || selectedMR.mr_id;
         const { error } = await supabase
           .from("maintenance_request")
           .update({
@@ -138,11 +144,11 @@ export default function MaintenancePage() {
             mr_desc: mrDesc,
             priority,
             request_status: requestStatus,
-            request_date: requestDate,
+            request_date: `${reqDateClean}T00:00:00`,
             updated_by_: currentUserEmail,
             date_updated: now,
           })
-          .eq("mr_id", selectedMR.mr_id);
+          .eq("maintenance_id", id);
 
         if (error) throw error;
       } else {
@@ -152,7 +158,7 @@ export default function MaintenancePage() {
             mr_desc: mrDesc,
             priority,
             request_status: requestStatus,
-            request_date: requestDate,
+            request_date: `${reqDateClean}T00:00:00`,
             created_by: currentUserEmail,
             date_created: now,
             updated_by_: currentUserEmail,
@@ -176,8 +182,9 @@ export default function MaintenancePage() {
   const handleDelete = async () => {
     if (!selectedMR) return;
     setIsSaving(true);
+    const id = selectedMR.maintenance_id || selectedMR.mr_id;
     try {
-      const { error } = await supabase.from("maintenance_request").delete().eq("mr_id", selectedMR.mr_id);
+      const { error } = await supabase.from("maintenance_request").delete().eq("maintenance_id", id);
       if (error) throw error;
       await fetchData();
       setIsDeleteOpen(false);
@@ -190,8 +197,9 @@ export default function MaintenancePage() {
 
   const filtered = requests.filter((r) => {
     const search = searchTerm.toLowerCase();
+    const id = String(r.maintenance_id || r.mr_id || "");
     const roomInfo = `room ${r.room_room_id} ${r.room?.room_desc || ""}`.toLowerCase();
-    return String(r.mr_id).includes(search) || roomInfo.includes(search) || (r.mr_desc || "").toLowerCase().includes(search);
+    return id.includes(search) || roomInfo.includes(search) || (r.mr_desc || "").toLowerCase().includes(search);
   });
 
   const getPriorityBadge = (p: string) => {
@@ -270,66 +278,72 @@ export default function MaintenancePage() {
                     </td>
                   </tr>
                 ) : (
-                  filtered.map((r) => (
-                    <tr key={r.mr_id} className="hover:bg-slate-50/50">
-                      <td className="px-4 py-3 font-mono font-bold text-navy-900">#{r.mr_id}</td>
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-slate-800">
-                          Room #{r.room_room_id} {r.room?.room_desc ? `(${r.room.room_desc})` : ""}
-                        </div>
-                        <div className="text-xs text-slate-500 truncate max-w-xs">{r.mr_desc}</div>
-                      </td>
-                      <td className="px-4 py-3">{getPriorityBadge(r.priority)}</td>
-                      <td className="px-4 py-3">
-                        <Select
-                          value={r.request_status}
-                          onValueChange={(val: any) => handleInlineStatusChange(r.mr_id, val)}
-                        >
-                          <SelectTrigger className="h-8 w-36 border-none p-0 bg-transparent">
-                            <SelectValue>{getStatusBadge(r.request_status)}</SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Open">Open</SelectItem>
-                            <SelectItem value="In Progress">In Progress</SelectItem>
-                            <SelectItem value="Resolved">Resolved</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-slate-500">{formatDate(r.request_date)}</td>
-                      <td className="px-4 py-3 text-xs text-slate-500">{r.created_by || "System"}</td>
-                      <td className="px-4 py-3 text-right space-x-1">
-                        <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(r)}>
-                          <Edit className="h-4 w-4 text-slate-600" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleOpenDelete(r)}>
-                          <Trash2 className="h-4 w-4 text-red-600" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))
+                  filtered.map((r) => {
+                    const ticketId = Number(r.maintenance_id || r.mr_id);
+                    return (
+                      <tr key={ticketId} className="hover:bg-slate-50/50">
+                        <td className="px-4 py-3 font-mono font-bold text-navy-900">#{ticketId}</td>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-slate-800">
+                            Room #{r.room_room_id} {r.room?.room_desc ? `(${r.room.room_desc})` : ""}
+                          </div>
+                          <div className="text-xs text-slate-500 truncate max-w-xs">{r.mr_desc}</div>
+                        </td>
+                        <td className="px-4 py-3">{getPriorityBadge(r.priority)}</td>
+                        <td className="px-4 py-3">
+                          <Select
+                            value={r.request_status}
+                            onValueChange={(val: any) => handleInlineStatusChange(ticketId, val)}
+                          >
+                            <SelectTrigger className="h-8 w-36 border-none p-0 bg-transparent">
+                              <SelectValue>{getStatusBadge(r.request_status)}</SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Open">Open</SelectItem>
+                              <SelectItem value="In Progress">In Progress</SelectItem>
+                              <SelectItem value="Resolved">Resolved</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-500">{formatDate(r.request_date)}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500">{r.created_by || "System"}</td>
+                        <td className="px-4 py-3 text-right space-x-1">
+                          <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(r)}>
+                            <Edit className="h-4 w-4 text-slate-600" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleOpenDelete(r)}>
+                            <Trash2 className="h-4 w-4 text-red-600" />
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
 
           <div className="md:hidden space-y-4">
-            {filtered.map((r) => (
-              <div key={r.mr_id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="font-mono font-bold text-xs text-gold-600">Ticket #{r.mr_id}</span>
-                  {getPriorityBadge(r.priority)}
-                </div>
-                <div className="font-bold text-navy-900">Room #{r.room_room_id}</div>
-                <p className="text-xs text-slate-600">{r.mr_desc}</p>
-                <div className="pt-2 border-t border-slate-100 flex justify-between items-center">
-                  {getStatusBadge(r.request_status)}
-                  <div className="flex gap-1">
-                    <Button variant="outline" size="sm" onClick={() => handleOpenEdit(r)}>Edit</Button>
-                    <Button variant="destructive" size="sm" onClick={() => handleOpenDelete(r)}>Delete</Button>
+            {filtered.map((r) => {
+              const ticketId = Number(r.maintenance_id || r.mr_id);
+              return (
+                <div key={ticketId} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="font-mono font-bold text-xs text-gold-600">Ticket #{ticketId}</span>
+                    {getPriorityBadge(r.priority)}
+                  </div>
+                  <div className="font-bold text-navy-900">Room #{r.room_room_id}</div>
+                  <p className="text-xs text-slate-600">{r.mr_desc}</p>
+                  <div className="pt-2 border-t border-slate-100 flex justify-between items-center">
+                    {getStatusBadge(r.request_status)}
+                    <div className="flex gap-1">
+                      <Button variant="outline" size="sm" onClick={() => handleOpenEdit(r)}>Edit</Button>
+                      <Button variant="destructive" size="sm" onClick={() => handleOpenDelete(r)}>Delete</Button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
@@ -417,7 +431,7 @@ export default function MaintenancePage() {
             <DialogTitle>Confirm Delete Ticket</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-slate-600">
-            Are you sure you want to delete maintenance ticket <strong>#{selectedMR?.mr_id}</strong>?
+            Are you sure you want to delete maintenance ticket <strong>#{selectedMR?.maintenance_id || selectedMR?.mr_id}</strong>?
           </p>
           <DialogFooter className="pt-4">
             <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>Cancel</Button>
