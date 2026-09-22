@@ -19,7 +19,7 @@ export default function SignInPage() {
       </div>
 
       <SignIn
-        forceRedirectUrl="/customer/dashboard"
+        fallbackRedirectUrl="/auth-callback"
         signUpUrl="/sign-up"
         appearance={{
           elements: {

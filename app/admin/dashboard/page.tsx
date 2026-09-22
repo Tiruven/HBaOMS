@@ -71,6 +71,30 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     fetchDashboardAnalytics();
+
+    // Lightweight Realtime subscription for live dashboard updates
+    const channel = supabase
+      .channel("dashboard-realtime-updates")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "booking" },
+        () => fetchDashboardAnalytics()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "payment" },
+        () => fetchDashboardAnalytics()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "check_in_out" },
+        () => fetchDashboardAnalytics()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const fetchDashboardAnalytics = async () => {
@@ -91,10 +115,12 @@ export default function AdminDashboardPage() {
         activeBookings: bookingsRes.count || 0,
       });
 
-      // 2. Revenue Over Time (Payments grouped by month)
+      // 2. Revenue Over Time (Current year payments grouped by month using idx_payment_date)
+      const currentYearStart = `${new Date().getFullYear()}-01-01`;
       const { data: payments } = await supabase
         .from("payment")
         .select("payment_amount, payment_date")
+        .gte("payment_date", currentYearStart)
         .order("payment_date", { ascending: true });
 
       const monthlyMap: Record<string, number> = {};

@@ -117,6 +117,25 @@ export default function CustomerBookingsListPage() {
     } else {
       fetchBookings();
     }
+
+    // Lightweight Realtime subscription for customer's reservations
+    const channel = supabase
+      .channel("customer-bookings-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "booking" },
+        () => fetchBookings()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "check_in_out" },
+        () => fetchBookings()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [searchParams, router, fetchBookings]);
 
   return (
