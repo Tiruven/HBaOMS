@@ -19,8 +19,8 @@ import { AuditFieldsView } from "@/components/shared/AuditFields";
 import { Loader2, AlertCircle } from "lucide-react";
 
 const serviceSchema = z.object({
-  service_name: z.string().trim().min(1, "Service name is required").max(15, "Max 15 characters"),
-  service_desc: z.string().max(100, "Max 100 characters").optional().nullable(),
+  service_name: z.string().trim().min(1, "Service name is required").max(100, "Max 100 characters"),
+  service_desc: z.string().max(500, "Max 500 characters").optional().nullable(),
   price: z.coerce.number().positive("Price must be greater than 0"),
 });
 

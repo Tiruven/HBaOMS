@@ -208,12 +208,39 @@ export default function AdminBookingDetailPage() {
                     <strong className="text-navy-900">{stay ? formatDate(stay.check_out_date) : "Not Set"}</strong>
                   </div>
                   <div className="flex justify-between text-slate-600">
+                    <span>Stay Status:</span>
+                    <span className="font-semibold">
+                      {stay?.status === "Auto Checked Out" ? (
+                        <span className="text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                          Auto Checked Out
+                        </span>
+                      ) : stay?.status === "Checked Out" ? (
+                        <span className="text-slate-700 bg-slate-100 px-2 py-0.5 rounded">Checked Out</span>
+                      ) : stay?.status === "Checked In" ? (
+                        <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">Checked In</span>
+                      ) : (
+                        <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded">Scheduled</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
                     <span>Actual Check-In:</span>
                     <span className="text-slate-500">{stay?.actual_check_in ? formatDate(stay.actual_check_in) : "Pending Check-in"}</span>
                   </div>
                   <div className="flex justify-between text-slate-600">
                     <span>Actual Check-Out:</span>
-                    <span className="text-slate-500">{stay?.actual_check_out ? formatDate(stay.actual_check_out) : "Pending Check-out"}</span>
+                    <span className="text-slate-500">
+                      {stay?.actual_check_out ? (
+                        <>
+                          {formatDate(stay.actual_check_out)}
+                          {stay.status === "Auto Checked Out" && (
+                            <span className="ml-1 text-[10px] text-purple-700 font-bold">(Auto)</span>
+                          )}
+                        </>
+                      ) : (
+                        "Pending Check-out"
+                      )}
+                    </span>
                   </div>
                 </div>
               </div>

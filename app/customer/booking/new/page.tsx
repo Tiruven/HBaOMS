@@ -137,18 +137,22 @@ export default function BookingWizardPage() {
     async function fetchOccupiedStays() {
       if (!selectedRoom) return;
       try {
+        const todayStr = new Date().toISOString().split("T")[0];
         const { data } = await supabase
           .from("check_in_out")
           .select("check_in_date, check_out_date, booking!inner(booking_status)")
           .eq("room_room_id", selectedRoom.room_id)
-          .eq("booking.booking_status", "Confirmed");
+          .eq("booking.booking_status", "Confirmed")
+          .gte("check_out_date", todayStr);
 
         if (data) {
           setOccupiedStays(
-            data.map((d) => ({
-              in: d.check_in_date.split("T")[0],
-              out: d.check_out_date.split("T")[0],
-            }))
+            data
+              .map((d) => ({
+                in: d.check_in_date.split("T")[0],
+                out: d.check_out_date.split("T")[0],
+              }))
+              .filter((stay) => stay.out >= todayStr)
           );
         }
       } catch (e) {
@@ -278,11 +282,13 @@ export default function BookingWizardPage() {
       }
 
       if (selectedRoom) {
+        const todayStr = new Date().toISOString().split("T")[0];
         const { data: stays, error } = await supabase
           .from("check_in_out")
           .select("check_in_date, check_out_date, booking!inner(booking_status)")
           .eq("room_room_id", selectedRoom.room_id)
-          .eq("booking.booking_status", "Confirmed");
+          .eq("booking.booking_status", "Confirmed")
+          .gte("check_out_date", todayStr);
 
         if (error) {
           console.error("Error checking availability:", error);
@@ -290,10 +296,12 @@ export default function BookingWizardPage() {
           const reqInStr = checkInDate;
           const reqOutStr = checkOutDate;
 
-          const formattedStays = stays.map((s) => ({
-            in: s.check_in_date.split("T")[0],
-            out: s.check_out_date.split("T")[0],
-          }));
+          const formattedStays = stays
+            .map((s) => ({
+              in: s.check_in_date.split("T")[0],
+              out: s.check_out_date.split("T")[0],
+            }))
+            .filter((stay) => stay.out >= todayStr);
 
           const overlaps = formattedStays.some(
             (stay) => reqInStr < stay.out && reqOutStr > stay.in

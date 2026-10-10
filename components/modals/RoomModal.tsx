@@ -26,7 +26,7 @@ import { AuditFieldsView } from "@/components/shared/AuditFields";
 import { Loader2, AlertCircle } from "lucide-react";
 
 const roomSchema = z.object({
-  room_desc: z.string().trim().min(1, "Room description/number is required").max(100, "Max 100 characters"),
+  room_desc: z.string().trim().min(1, "Room description/number is required").max(500, "Max 500 characters"),
   room_status: z.enum(["Available", "Maintenance"], {
     required_error: "Please select a room status",
   }),

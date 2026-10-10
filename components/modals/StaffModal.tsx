@@ -36,8 +36,8 @@ const roles: StaffRole[] = [
 ];
 
 const staffSchema = z.object({
-  staff_fname: z.string().min(1, "First name is required").max(20, "Max 20 characters"),
-  staff_lname: z.string().min(1, "Last name is required").max(20, "Max 20 characters"),
+  staff_fname: z.string().min(1, "First name is required").max(100, "Max 100 characters"),
+  staff_lname: z.string().min(1, "Last name is required").max(100, "Max 100 characters"),
   role: z.enum([
     "Admin",
     "Receptnst",
@@ -50,7 +50,7 @@ const staffSchema = z.object({
     required_error: "Please select a staff role",
   }),
   email: z.string().email("Invalid email address").max(254, "Max 254 characters"),
-  contact_info: z.string().min(7, "Min 7 characters").max(15, "Max 15 characters"),
+  contact_info: z.string().min(7, "Min 7 characters").max(30, "Max 30 characters"),
   is_active: z.enum(["Y", "N"]),
 });
 

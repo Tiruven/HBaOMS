@@ -19,8 +19,8 @@ import { AuditFieldsView } from "@/components/shared/AuditFields";
 import { Loader2, AlertCircle } from "lucide-react";
 
 const tourSchema = z.object({
-  tour_name: z.string().trim().min(1, "Tour name is required").max(30, "Max 30 characters"),
-  tour_desc: z.string().max(100, "Max 100 characters").optional().nullable(),
+  tour_name: z.string().trim().min(1, "Tour name is required").max(100, "Max 100 characters"),
+  tour_desc: z.string().max(500, "Max 500 characters").optional().nullable(),
   adult_price: z.coerce.number().positive("Adult price must be greater than 0"),
   child_price: z.coerce.number().positive("Child price must be greater than 0"),
   durations: z.coerce.number().int("Hours must be a whole number").positive("Duration must be at least 1 hour"),

@@ -6,6 +6,7 @@ import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
 import { CheckInOut, Room, Booking } from "@/lib/types";
 import { formatDate, cn } from "@/lib/utils";
+import { runAutoCheckout } from "@/lib/autoCheckout";
 import { SkeletonTable } from "@/components/shared/SkeletonTable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Search, Trash2, CalendarCheck, AlertTriangle } from "lucide-react";
+import { Plus, Search, Trash2, CalendarCheck, AlertTriangle, RefreshCw, Bot, CheckCircle } from "lucide-react";
 
 export default function CheckInOutPage() {
   const { user } = useUser();
@@ -33,6 +34,8 @@ export default function CheckInOutPage() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [isSyncingAutoCheckout, setIsSyncingAutoCheckout] = useState<boolean>(false);
+  const [autoCheckoutNotice, setAutoCheckoutNotice] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>("");
 
   // Modal State
@@ -49,8 +52,39 @@ export default function CheckInOutPage() {
   const [inlineError, setInlineError] = useState<string>("");
 
   useEffect(() => {
-    fetchData();
+    // Run auto checkout on mount to ensure expired stays are handled immediately
+    initData();
   }, []);
+
+  const initData = async () => {
+    try {
+      await runAutoCheckout();
+    } catch (e) {
+      console.warn("Auto checkout on mount error:", e);
+    }
+    await fetchData();
+  };
+
+  const handleManualAutoCheckoutSync = async () => {
+    setIsSyncingAutoCheckout(true);
+    setAutoCheckoutNotice(null);
+    try {
+      const res = await runAutoCheckout();
+      if (res.success) {
+        if (res.count > 0) {
+          setAutoCheckoutNotice(`Auto-checked out ${res.count} overdue reservation${res.count > 1 ? "s" : ""}.`);
+        } else {
+          setAutoCheckoutNotice("All reservation stays are currently up-to-date.");
+        }
+      }
+      await fetchData();
+    } catch (e: any) {
+      setAutoCheckoutNotice("Sync failed: " + (e.message || "Unknown error"));
+    } finally {
+      setIsSyncingAutoCheckout(false);
+      setTimeout(() => setAutoCheckoutNotice(null), 6000);
+    }
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -113,7 +147,6 @@ export default function CheckInOutPage() {
     }
 
     // 2. Overlap detection query against check_in_out
-    // Formula: new_check_in < existing_check_out AND new_check_out > existing_check_in
     try {
       const { data: existingStays, error: queryError } = await supabase
         .from("check_in_out")
@@ -123,7 +156,6 @@ export default function CheckInOutPage() {
       if (queryError) throw queryError;
 
       const hasOverlap = (existingStays || []).some((s) => {
-        // Skip current stay if updating
         if (selectedStay && s.room_room_id === selectedStay.room_room_id && s.booking_booking_id === selectedStay.booking_booking_id) {
           return false;
         }
@@ -224,10 +256,45 @@ export default function CheckInOutPage() {
     }
   };
 
+  const getStatusBadge = (status?: string | null) => {
+    if (status === "Auto Checked Out") {
+      return (
+        <Badge className="bg-purple-100 text-purple-800 border-purple-300 font-semibold gap-1 text-xs" variant="outline">
+          <Bot className="h-3 w-3 text-purple-600" /> Auto Checked Out
+        </Badge>
+      );
+    }
+    if (status === "Checked Out") {
+      return (
+        <Badge className="bg-slate-100 text-slate-700 border-slate-300 font-semibold gap-1 text-xs" variant="outline">
+          <CheckCircle className="h-3 w-3 text-slate-500" /> Checked Out
+        </Badge>
+      );
+    }
+    if (status === "Checked In") {
+      return (
+        <Badge className="bg-emerald-50 text-emerald-700 border-emerald-300 font-semibold gap-1 text-xs" variant="outline">
+          <CheckCircle className="h-3 w-3 text-emerald-600" /> Checked In
+        </Badge>
+      );
+    }
+    return (
+      <Badge className="bg-blue-50 text-blue-700 border-blue-200 font-semibold text-xs" variant="outline">
+        Scheduled
+      </Badge>
+    );
+  };
+
   const filteredStays = stays.filter((s) => {
     const search = searchTerm.toLowerCase();
     const custName = `${s.booking?.customer?.cust_fname || ""} ${s.booking?.customer?.cust_lname || ""}`.toLowerCase();
-    return String(s.room_room_id).includes(search) || String(s.booking_booking_id).includes(search) || custName.includes(search);
+    const statusText = (s.status || "scheduled").toLowerCase();
+    return (
+      String(s.room_room_id).includes(search) ||
+      String(s.booking_booking_id).includes(search) ||
+      custName.includes(search) ||
+      statusText.includes(search)
+    );
   });
 
   return (
@@ -236,18 +303,43 @@ export default function CheckInOutPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
         <div>
           <h1 className="text-2xl font-bold text-navy-900">Check In / Out Allocations</h1>
-          <p className="text-slate-500 text-sm">Assign room stays to confirmed guest bookings with overlap verification.</p>
+          <p className="text-slate-500 text-sm">Assign room stays to confirmed guest bookings with automated checkout and overlap verification.</p>
         </div>
-        <Button onClick={handleOpenAdd} variant="gold" className="gap-2">
-          <Plus className="h-4 w-4" /> Allocate Room Stay
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            onClick={handleManualAutoCheckoutSync}
+            variant="outline"
+            disabled={isSyncingAutoCheckout}
+            className="gap-2 border-purple-300 text-purple-700 hover:bg-purple-50"
+            title="Scan and automatically check out past reservations"
+          >
+            <RefreshCw className={`h-4 w-4 ${isSyncingAutoCheckout ? "animate-spin" : ""}`} />
+            {isSyncingAutoCheckout ? "Checking Overdue..." : "Auto-Checkout Check"}
+          </Button>
+          <Button onClick={handleOpenAdd} variant="gold" className="gap-2">
+            <Plus className="h-4 w-4" /> Allocate Room Stay
+          </Button>
+        </div>
       </div>
+
+      {/* Auto Checkout System Notification Banner */}
+      {autoCheckoutNotice && (
+        <div className="bg-purple-50 border border-purple-200 text-purple-800 p-4 rounded-xl flex items-center justify-between gap-3 text-xs font-semibold">
+          <div className="flex items-center gap-2">
+            <Bot className="h-4 w-4 text-purple-600 shrink-0" />
+            <span>{autoCheckoutNotice}</span>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => setAutoCheckoutNotice(null)} className="text-xs h-7 text-purple-700">
+            Dismiss
+          </Button>
+        </div>
+      )}
 
       {/* Filter */}
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
         <Input
-          placeholder="Search by Room ID, Booking ID or Guest name..."
+          placeholder="Search by Room ID, Booking ID, Guest name, or Status..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="pl-9 bg-white"
@@ -267,7 +359,7 @@ export default function CheckInOutPage() {
                   <th className="px-4 py-3">Booking & Guest</th>
                   <th className="px-4 py-3">Scheduled Dates</th>
                   <th className="px-4 py-3">Actual Check-In/Out</th>
-                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Stay Status</th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
@@ -282,7 +374,7 @@ export default function CheckInOutPage() {
                   filteredStays.map((s) => (
                     <tr key={`${s.room_room_id}-${s.booking_booking_id}`} className="hover:bg-slate-50/50">
                       <td className="px-4 py-3">
-                        <Badge variant="outline" className="font-mono text-navy-900 border-navy-300">
+                        <Badge variant="outline" className="font-mono text-navy-900 border-navy-300 font-bold">
                           Room #{s.room_room_id}
                         </Badge>
                       </td>
@@ -297,23 +389,24 @@ export default function CheckInOutPage() {
                         <div className="text-amber-700">Out: {formatDate(s.check_out_date)}</div>
                       </td>
                       <td className="px-4 py-3 text-xs space-y-1">
-                        <div>In: {s.actual_check_in ? formatDate(s.actual_check_in) : <span className="text-slate-400 font-normal italic">Not yet</span>}</div>
-                        <div>Out: {s.actual_check_out ? formatDate(s.actual_check_out) : <span className="text-slate-400 font-normal italic">Not yet</span>}</div>
+                        <div>
+                          In: {s.actual_check_in ? formatDate(s.actual_check_in) : <span className="text-slate-400 font-normal italic">Not yet</span>}
+                        </div>
+                        <div>
+                          Out: {s.actual_check_out ? (
+                            <span>
+                              {formatDate(s.actual_check_out)}
+                              {s.status === "Auto Checked Out" && (
+                                <span className="ml-1 text-[10px] text-purple-700 font-bold">(Auto)</span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-normal italic">Not yet</span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
-                        <Badge
-                          className={cn(
-                            "text-xs font-semibold px-2 py-0.5 rounded border",
-                            s.status === "Checked Out"
-                              ? "bg-slate-100 text-slate-700 border-slate-200"
-                              : s.status === "Checked In"
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              : "bg-blue-50 text-blue-700 border-blue-200"
-                          )}
-                          variant="outline"
-                        >
-                          {s.status || "Scheduled"}
-                        </Badge>
+                        {getStatusBadge(s.status)}
                       </td>
                       <td className="px-4 py-3 text-right space-x-2">
                         {(!s.status || s.status === "Scheduled") && (
@@ -325,6 +418,11 @@ export default function CheckInOutPage() {
                           <Button size="sm" variant="outline" className="text-xs border-amber-600 text-amber-600 hover:bg-amber-50" onClick={() => handleCheckOut(s)}>
                             Check Out
                           </Button>
+                        )}
+                        {s.status === "Auto Checked Out" && (
+                          <span className="text-xs text-purple-600 font-semibold mr-2 inline-flex items-center gap-1">
+                            <Bot className="h-3 w-3" /> Auto Handled
+                          </span>
                         )}
                         <Button variant="ghost" size="sm" onClick={() => handleOpenDelete(s)}>
                           <Trash2 className="h-4 w-4 text-red-600" />
@@ -343,19 +441,7 @@ export default function CheckInOutPage() {
               <div key={`${s.room_room_id}-${s.booking_booking_id}`} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
                 <div className="flex justify-between items-center">
                   <Badge variant="outline" className="font-mono font-bold">Room #{s.room_room_id}</Badge>
-                  <Badge
-                    className={cn(
-                      "text-xs font-semibold px-2 py-0.5 rounded border",
-                      s.status === "Checked Out"
-                        ? "bg-slate-100 text-slate-700 border-slate-200"
-                        : s.status === "Checked In"
-                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                        : "bg-blue-50 text-blue-700 border-blue-200"
-                    )}
-                    variant="outline"
-                  >
-                    {s.status || "Scheduled"}
-                  </Badge>
+                  {getStatusBadge(s.status)}
                 </div>
                 <div className="font-bold text-navy-900">
                   {s.booking?.customer ? `${s.booking.customer.cust_fname} ${s.booking.customer.cust_lname}` : "Guest"}
@@ -378,7 +464,9 @@ export default function CheckInOutPage() {
                   {s.actual_check_out && (
                     <div className="flex justify-between text-amber-700">
                       <span>Actual Out:</span>
-                      <strong>{formatDate(s.actual_check_out)}</strong>
+                      <strong>
+                        {formatDate(s.actual_check_out)} {s.status === "Auto Checked Out" ? "(Auto)" : ""}
+                      </strong>
                     </div>
                   )}
                 </div>

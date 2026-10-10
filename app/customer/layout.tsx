@@ -45,8 +45,8 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
 
           await supabase.from("customer").insert([
             {
-              cust_fname: fname.substring(0, 20),
-              cust_lname: lname.substring(0, 20),
+              cust_fname: fname.substring(0, 100),
+              cust_lname: lname.substring(0, 100),
               email: email,
               password_hash: "CLERK_AUTH",
               town: "Grand Baie",

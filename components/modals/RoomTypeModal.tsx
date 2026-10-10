@@ -19,7 +19,7 @@ import { AuditFieldsView } from "@/components/shared/AuditFields";
 import { Loader2, AlertCircle } from "lucide-react";
 
 const roomTypeSchema = z.object({
-  type: z.string().trim().min(1, "Room type is required").max(15, "Max 15 characters"),
+  type: z.string().trim().min(1, "Room type is required").max(100, "Max 100 characters"),
   price: z.coerce.number().positive("Price must be greater than 0"),
   size: z.coerce.number().positive("Size must be greater than 0"),
 });

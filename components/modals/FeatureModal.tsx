@@ -19,8 +19,8 @@ import { AuditFieldsView } from "@/components/shared/AuditFields";
 import { Loader2 } from "lucide-react";
 
 const featureSchema = z.object({
-  room_features: z.string().min(1, "Feature name is required").max(15, "Max 15 characters"),
-  feature_desc: z.string().max(30, "Max 30 characters").optional().nullable(),
+  room_features: z.string().min(1, "Feature name is required").max(100, "Max 100 characters"),
+  feature_desc: z.string().max(500, "Max 500 characters").optional().nullable(),
 });
 
 type FeatureFormValues = z.infer<typeof featureSchema>;

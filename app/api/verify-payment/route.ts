@@ -53,8 +53,8 @@ export async function POST(req: Request) {
 
     const meta = session.metadata || {};
     const guestEmail = meta.guestEmail || "";
-    const guestFname = (meta.guestFname || "Guest").substring(0, 20);
-    const guestLname = (meta.guestLname || "Customer").substring(0, 20);
+    const guestFname = (meta.guestFname || "Guest").substring(0, 100);
+    const guestLname = (meta.guestLname || "Customer").substring(0, 100);
     const roomId = meta.roomId ? Number(meta.roomId) : null;
     const checkInDate = meta.checkInDate || null;
     const checkOutDate = meta.checkOutDate || null;
@@ -112,7 +112,7 @@ export async function POST(req: Request) {
           booking_type: boardType,
           booking_status: "Confirmed",
           stripe_session_id: sessionId,
-          created_by: guestEmail.substring(0, 30),
+          created_by: guestEmail.substring(0, 255),
           date_created: new Date().toISOString(),
         },
       ])
@@ -249,7 +249,7 @@ export async function POST(req: Request) {
         payment_type: "Stripe",
         payment_method: "ON",
         payment_amount: amountPaid,
-        created_by: guestEmail.substring(0, 30),
+        created_by: guestEmail.substring(0, 255),
         date_created: new Date().toISOString(),
       },
     ]);

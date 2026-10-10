@@ -158,7 +158,24 @@ export default function CustomerBookingDetailPage() {
           </div>
 
           <div className="space-y-1 text-xs border-t sm:border-t-0 sm:border-l sm:pl-6 border-slate-200 pt-4 sm:pt-0">
-            <span className="text-slate-400 font-bold uppercase tracking-wider block">Allocated Accommodation</span>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400 font-bold uppercase tracking-wider block">Allocated Accommodation</span>
+              {stay?.status === "Auto Checked Out" && (
+                <Badge className="bg-purple-100 text-purple-800 border border-purple-300 text-[10px] font-semibold">
+                  Auto Checked Out
+                </Badge>
+              )}
+              {stay?.status === "Checked Out" && (
+                <Badge className="bg-slate-100 text-slate-700 border border-slate-300 text-[10px] font-semibold">
+                  Checked Out
+                </Badge>
+              )}
+              {stay?.status === "Checked In" && (
+                <Badge className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-semibold">
+                  Checked In
+                </Badge>
+              )}
+            </div>
             {/* Prominent Large Room Number Display */}
             <div className="flex items-center gap-2 my-1">
               <BedDouble className="h-6 w-6 text-[#A37836]" />
@@ -166,7 +183,7 @@ export default function CustomerBookingDetailPage() {
                 Room #{stay?.room_room_id || "Unassigned"}
               </span>
             </div>
-            <div className="font-bold text-sm text-[#1A202C]">
+            <div className="font-bold text-base text-[#1A202C]">
               {stay?.room?.room_type?.type || "Luxury Suite"}
             </div>
             <div className="text-slate-600 mt-2">
@@ -175,6 +192,11 @@ export default function CustomerBookingDetailPage() {
             <div className="text-slate-600">
               Check-Out: <strong>{stay ? formatDate(stay.check_out_date) : "Pending"}</strong>
             </div>
+            {stay?.status === "Auto Checked Out" && (
+              <div className="mt-2 p-2 bg-purple-50 border border-purple-200 rounded-lg text-[11px] text-purple-800 font-medium">
+                Note: System completed checkout automatically upon conclusion of reservation period.
+              </div>
+            )}
           </div>
         </div>
 
