@@ -2,13 +2,15 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
+import { checkServiceSlotCapacity, checkTripCapacity } from "@/lib/capacity";
+import { executeStripeAndDbRefund } from "@/lib/refundHelper";
+import { nowInstant, mauritiusToday, mauritiusToInstant, startOfMauritiusDay } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "sk_test_placeholder_for_build";
 const stripe = new Stripe(stripeSecretKey);
 
-// Server-side Supabase client using service role key (bypasses RLS)
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder_key";
 
@@ -36,7 +38,189 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2. Idempotency check — skip if already processed
+    const meta = session.metadata || {};
+    const amountPaid = (session.amount_total || 0) / 100;
+    const today = mauritiusToday();
+
+    // =========================================================================
+    // FLOW 2: PORTAL ADD-ON CHECKOUT
+    // =========================================================================
+    if (meta.type === "addon") {
+      const bookingId = Number(meta.bookingId);
+      const guestEmail = meta.guestEmail || "guest@hbaoms.com";
+
+      // 2a. Idempotency check on payment table
+      const { data: existingPayment } = await supabase
+        .from("payment")
+        .select("payment_id")
+        .eq("stripe_session_id", sessionId)
+        .maybeSingle();
+
+      if (existingPayment) {
+        return NextResponse.json({
+          success: true,
+          bookingId,
+          alreadyProcessed: true,
+        });
+      }
+
+      const serviceBookings = meta.serviceBookings ? JSON.parse(meta.serviceBookings) : [];
+      const tripBookings = meta.tripBookings ? JSON.parse(meta.tripBookings) : [];
+
+      // 2b. Re-check capacity for all items
+      let capacityFailed = false;
+      let failureReason = "";
+
+      for (const s of serviceBookings) {
+        const slotCap = await checkServiceSlotCapacity(
+          supabase,
+          Number(s.serviceId),
+          s.serviceDate,
+          s.timeIn,
+          s.timeOut
+        );
+        if (!slotCap.available) {
+          capacityFailed = true;
+          failureReason = "Service slot is no longer available.";
+          break;
+        }
+      }
+
+      if (!capacityFailed) {
+        for (const t of tripBookings) {
+          // Check duplicate trip booking on same booking
+          const { data: dupTb } = await supabase
+            .from("trip_booking")
+            .select("trip_trip_id")
+            .eq("trip_trip_id", Number(t.tripId))
+            .eq("booking_booking_id", bookingId)
+            .maybeSingle();
+
+          if (dupTb) {
+            capacityFailed = true;
+            failureReason = "Excursion already booked on this reservation.";
+            break;
+          }
+
+          const tripCap = await checkTripCapacity(supabase, Number(t.tripId));
+          const reqPassengers = (Number(t.numAdult) || 0) + (Number(t.numChild) || 0);
+          if (tripCap.remainingSeats < reqPassengers) {
+            capacityFailed = true;
+            failureReason = "Excursion seats are no longer available.";
+            break;
+          }
+        }
+      }
+
+      // 2c. If capacity failed: automatically refund in full
+      if (capacityFailed) {
+        // Record temporary payment to anchor refund
+        const { data: tempPay } = await supabase
+          .from("payment")
+          .insert([
+            {
+              booking_booking_id: bookingId,
+              payment_date: today,
+              payment_type: "Addon",
+              payment_method: "ON",
+              payment_amount: amountPaid,
+              stripe_session_id: sessionId,
+              created_by: guestEmail,
+              date_created: new Date().toISOString(),
+            },
+          ])
+          .select("payment_id")
+          .single();
+
+        if (tempPay) {
+          await executeStripeAndDbRefund({
+            supabase,
+            paymentId: tempPay.payment_id,
+            bookingId,
+            stripeSessionId: sessionId,
+            refundAmountMur: amountPaid,
+            reason: `Automatic full refund: ${failureReason}`,
+            userEmail: guestEmail,
+          });
+        }
+
+        return NextResponse.json({
+          success: false,
+          capacityExceeded: true,
+          message: `${failureReason} Your payment has been automatically refunded in full.`,
+        });
+      }
+
+      // 2d. Insert payment row
+      const { data: newPay, error: pErr } = await supabase
+        .from("payment")
+        .insert([
+          {
+            booking_booking_id: bookingId,
+            payment_date: today,
+            payment_type: "Addon",
+            payment_method: "ON",
+            payment_amount: amountPaid,
+            stripe_session_id: sessionId,
+            created_by: guestEmail,
+            date_created: new Date().toISOString(),
+          },
+        ])
+        .select("payment_id")
+        .single();
+
+      if (pErr || !newPay) {
+        console.error("Add-on payment insertion error:", pErr);
+        return NextResponse.json({ error: "Failed to create payment receipt" }, { status: 500 });
+      }
+
+      const paymentId = newPay.payment_id;
+
+      // 2e. Insert service bookings linked to payment_id
+      for (const s of serviceBookings) {
+        await supabase.from("service_booking").insert([
+          {
+            booking_booking_id: bookingId,
+            service_service_id: Number(s.serviceId),
+            service_date: s.serviceDate,
+            time_in: s.timeIn,
+            time_out: s.timeOut,
+            num_person: Number(s.numPerson) || 1,
+            total_amount: Number(s.amount) || 0,
+            sb_status: "Pending",
+            payment_id: paymentId,
+            created_by: guestEmail,
+            date_created: new Date().toISOString(),
+          },
+        ]);
+      }
+
+      // 2f. Insert trip bookings linked to payment_id
+      for (const t of tripBookings) {
+        await supabase.from("trip_booking").insert([
+          {
+            trip_trip_id: Number(t.tripId),
+            booking_booking_id: bookingId,
+            num_adult: Number(t.numAdult) || 0,
+            num_child: Number(t.numChild) || 0,
+            total_amount: Number(t.amount) || 0,
+            payment_id: paymentId,
+          },
+        ]);
+      }
+
+      return NextResponse.json({
+        success: true,
+        bookingId,
+        paymentId,
+      });
+    }
+
+    // =========================================================================
+    // FLOW 1: NEW ROOM BOOKING (WIZARD)
+    // =========================================================================
+
+    // Idempotency check — skip if already processed
     const { data: existingBooking } = await supabase
       .from("booking")
       .select("booking_id")
@@ -51,7 +235,6 @@ export async function POST(req: Request) {
       });
     }
 
-    const meta = session.metadata || {};
     const guestEmail = meta.guestEmail || "";
     const guestFname = (meta.guestFname || "Guest").substring(0, 100);
     const guestLname = (meta.guestLname || "Customer").substring(0, 100);
@@ -59,10 +242,10 @@ export async function POST(req: Request) {
     const checkInDate = meta.checkInDate || null;
     const checkOutDate = meta.checkOutDate || null;
     const boardType = meta.boardType || "RO";
-    const amountPaid = (session.amount_total || 0) / 100;
-    const today = new Date().toISOString().split("T")[0];
+    const numAdults = Number(meta.numAdults) || 1;
+    const numChildren = Number(meta.numChildren) || 0;
 
-    // 3. Get or create customer record
+    // Get or create customer record
     let custId: number;
     const { data: existingCust } = await supabase
       .from("customer")
@@ -101,7 +284,7 @@ export async function POST(req: Request) {
       custId = newCust.cust_id;
     }
 
-    // 4. Insert confirmed booking with duplicate key race condition protection
+    // Insert confirmed booking with guest counts
     let bookingId: number;
     const { data: newBooking, error: bErr } = await supabase
       .from("booking")
@@ -112,6 +295,8 @@ export async function POST(req: Request) {
           booking_type: boardType,
           booking_status: "Confirmed",
           stripe_session_id: sessionId,
+          num_adults: numAdults,
+          num_children: numChildren,
           created_by: guestEmail.substring(0, 255),
           date_created: new Date().toISOString(),
         },
@@ -120,7 +305,6 @@ export async function POST(req: Request) {
       .single();
 
     if (bErr) {
-      // Race condition handling if duplicate key occurs
       if (bErr.code === "23505") {
         const { data: duplicateBooking } = await supabase
           .from("booking")
@@ -141,12 +325,37 @@ export async function POST(req: Request) {
     }
     bookingId = newBooking.booking_id;
 
-    // 5. Insert check_in_out stay record
-    if (roomId && checkInDate && checkOutDate) {
-      const formattedIn = checkInDate.includes("T") ? checkInDate : `${checkInDate}T14:00:00.000Z`;
-      const formattedOut = checkOutDate.includes("T") ? checkOutDate : `${checkOutDate}T11:00:00.000Z`;
+    // Insert payment record
+    let paymentId: number | undefined;
+    const { data: payRow, error: payErr } = await supabase
+      .from("payment")
+      .insert([
+        {
+          booking_booking_id: bookingId,
+          payment_date: today,
+          payment_type: "Booking",
+          payment_method: "ON",
+          payment_amount: amountPaid,
+          stripe_session_id: sessionId,
+          created_by: guestEmail.substring(0, 255),
+          date_created: new Date().toISOString(),
+        },
+      ])
+      .select("payment_id")
+      .single();
 
-      const { error: cioErr } = await supabase.from("check_in_out").insert([
+    if (payErr) {
+      console.error("payment insert error:", payErr.message);
+    } else if (payRow) {
+      paymentId = payRow.payment_id;
+    }
+
+    // Insert check_in_out stay record
+    if (roomId && checkInDate && checkOutDate) {
+      const formattedIn = checkInDate.includes("T") ? checkInDate : mauritiusToInstant(checkInDate, "14:00:00");
+      const formattedOut = checkOutDate.includes("T") ? checkOutDate : mauritiusToInstant(checkOutDate, "11:00:00");
+
+      await supabase.from("check_in_out").insert([
         {
           booking_booking_id: bookingId,
           room_room_id: roomId,
@@ -154,109 +363,13 @@ export async function POST(req: Request) {
           check_out_date: formattedOut,
         },
       ]);
-      if (cioErr) {
-        console.error("check_in_out insert error:", cioErr.message);
-      }
     }
 
-    // 5b. Insert service bookings
-    const selectedServices = meta.services ? JSON.parse(meta.services) : [];
-    if (selectedServices && Array.isArray(selectedServices) && selectedServices.length > 0) {
-      for (const srvId of selectedServices) {
-        const { data: srv } = await supabase
-          .from("service")
-          .select("price")
-          .eq("service_id", Number(srvId))
-          .maybeSingle();
+    // Note: Per v5.1, Flow 1 wizard handles room, board plan, and packages only.
+    // All services and tours/trips are booked post-confirmation in the client portal.
 
-        const srvPrice = srv?.price || 0;
-        await supabase.from("service_booking").insert([
-          {
-            booking_booking_id: bookingId,
-            service_service_id: Number(srvId),
-            service_date: checkInDate || today,
-            time_in: `${checkInDate || today}T10:00:00.000Z`,
-            time_out: `${checkInDate || today}T11:00:00.000Z`,
-            num_person: 1,
-            total_amount: srvPrice,
-            sb_status: "Confirmed",
-            created_by: "Stripe Verify",
-            date_created: new Date().toISOString(),
-          },
-        ]);
-      }
-    }
-
-    // 5c. Insert trip bookings
-    const selectedTours = meta.tours ? JSON.parse(meta.tours) : [];
-    if (selectedTours && Array.isArray(selectedTours) && selectedTours.length > 0) {
-      for (const tourId of selectedTours) {
-        const { data: tourData } = await supabase
-          .from("tour")
-          .select("adult_price")
-          .eq("tour_id", Number(tourId))
-          .maybeSingle();
-
-        const adultPrice = tourData?.adult_price || 0;
-
-        const { data: existingTrip } = await supabase
-          .from("trip")
-          .select("trip_id")
-          .eq("tour_tour_id", Number(tourId))
-          .eq("trip_status", "Scheduled")
-          .limit(1)
-          .maybeSingle();
-
-        let tripId: number;
-        if (existingTrip) {
-          tripId = existingTrip.trip_id;
-        } else {
-          const { data: newTrip, error: tErr } = await supabase
-            .from("trip")
-            .insert({
-              tour_tour_id: Number(tourId),
-              trip_date: `${checkInDate || today}T09:00:00.000Z`,
-              start_time: `${checkInDate || today}T09:00:00.000Z`,
-              return_time: `${checkInDate || today}T17:00:00.000Z`,
-              trip_status: "Scheduled",
-              created_by: "Stripe Sync",
-            })
-            .select("trip_id")
-            .single();
-
-          if (tErr || !newTrip) {
-            console.error("Trip creation error for tour:", tourId, tErr);
-            continue;
-          }
-          tripId = newTrip.trip_id;
-        }
-
-        await supabase.from("trip_booking").insert({
-          trip_trip_id: tripId,
-          booking_booking_id: bookingId,
-          num_adult: 1,
-          num_child: 0,
-          total_amount: adultPrice,
-        });
-      }
-    }
-
-    // 6. Insert payment record
-    const { error: payErr } = await supabase.from("payment").insert([
-      {
-        booking_booking_id: bookingId,
-        payment_date: today,
-        payment_type: "Stripe",
-        payment_method: "ON",
-        payment_amount: amountPaid,
-        created_by: guestEmail.substring(0, 255),
-        date_created: new Date().toISOString(),
-      },
-    ]);
-    if (payErr) console.error("payment insert error:", payErr.message);
-
-    // 7. Insert notification
-    const { error: notifErr } = await supabase.from("notification").insert([
+    // Insert notification
+    await supabase.from("notification").insert([
       {
         customer_cust_id: custId,
         booking_booking_id: bookingId,
@@ -267,9 +380,7 @@ export async function POST(req: Request) {
         date_created: new Date().toISOString(),
       },
     ]);
-    if (notifErr) console.error("notification insert error:", notifErr.message);
 
-    console.log(`[INFO] Booking #${bookingId} created via Stripe session ${sessionId}`);
     return NextResponse.json({ success: true, bookingId, custId });
   } catch (error: any) {
     console.error("verify-payment error:", error);

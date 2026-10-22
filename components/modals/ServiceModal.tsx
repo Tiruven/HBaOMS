@@ -22,6 +22,11 @@ const serviceSchema = z.object({
   service_name: z.string().trim().min(1, "Service name is required").max(100, "Max 100 characters"),
   service_desc: z.string().max(500, "Max 500 characters").optional().nullable(),
   price: z.coerce.number().positive("Price must be greater than 0"),
+  service_type: z.enum(["scheduled", "on_demand"]),
+  duration_min: z.coerce.number().int().min(15, "Minimum duration is 15 minutes"),
+  daily_open_time: z.string().min(1, "Opening time required"),
+  daily_close_time: z.string().min(1, "Closing time required"),
+  capacity: z.coerce.number().int().min(1, "Minimum capacity is 1"),
 });
 
 type ServiceFormValues = z.infer<typeof serviceSchema>;
@@ -47,6 +52,7 @@ export const ServiceModal: React.FC<ServiceModalProps> = ({
     register,
     handleSubmit,
     reset,
+    watch,
     formState: { errors },
   } = useForm<ServiceFormValues>({
     resolver: zodResolver(serviceSchema),
@@ -54,8 +60,15 @@ export const ServiceModal: React.FC<ServiceModalProps> = ({
       service_name: "",
       service_desc: "",
       price: 50,
+      service_type: "scheduled",
+      duration_min: 60,
+      daily_open_time: "09:00",
+      daily_close_time: "18:00",
+      capacity: 5,
     },
   });
+
+  const currentServiceType = watch("service_type");
 
   useEffect(() => {
     setSubmitError(null);
@@ -64,12 +77,22 @@ export const ServiceModal: React.FC<ServiceModalProps> = ({
         service_name: initialData.service_name,
         service_desc: initialData.service_desc || "",
         price: initialData.price,
+        service_type: (initialData.service_type as "scheduled" | "on_demand") || "scheduled",
+        duration_min: initialData.duration_min || 60,
+        daily_open_time: initialData.daily_open_time ? initialData.daily_open_time.substring(0, 5) : "09:00",
+        daily_close_time: initialData.daily_close_time ? initialData.daily_close_time.substring(0, 5) : "18:00",
+        capacity: initialData.capacity || 5,
       });
     } else {
       reset({
         service_name: "",
         service_desc: "",
         price: 50,
+        service_type: "scheduled",
+        duration_min: 60,
+        daily_open_time: "09:00",
+        daily_close_time: "18:00",
+        capacity: 5,
       });
     }
   }, [initialData, reset, isOpen]);
@@ -90,7 +113,7 @@ export const ServiceModal: React.FC<ServiceModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {initialData ? "Edit Hotel Service" : "Add New Hotel Service"}
@@ -121,7 +144,7 @@ export const ServiceModal: React.FC<ServiceModalProps> = ({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="price">Service Rate ($) *</Label>
+              <Label htmlFor="price">Service Rate (MUR) *</Label>
               <Input
                 id="price"
                 type="number"
@@ -150,6 +173,74 @@ export const ServiceModal: React.FC<ServiceModalProps> = ({
               </p>
             )}
           </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="service_type">Service Type *</Label>
+              <select
+                id="service_type"
+                {...register("service_type")}
+                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+              >
+                <option value="scheduled">Scheduled (Timed Slot)</option>
+                <option value="on_demand">On-Demand (Flexible)</option>
+              </select>
+              {errors.service_type && (
+                <p className="text-xs text-red-600 font-medium">
+                  {errors.service_type.message}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="capacity">Concurrent Slot Capacity *</Label>
+              <Input
+                id="capacity"
+                type="number"
+                min="1"
+                placeholder="5"
+                {...register("capacity")}
+              />
+              {errors.capacity && (
+                <p className="text-xs text-red-600 font-medium">
+                  {errors.capacity.message}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {currentServiceType === "scheduled" && (
+            <div className="grid grid-cols-3 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+              <div className="space-y-1">
+                <Label htmlFor="duration_min" className="text-xs">Duration (mins)</Label>
+                <Input
+                  id="duration_min"
+                  type="number"
+                  step="15"
+                  min="15"
+                  {...register("duration_min")}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="daily_open_time" className="text-xs">Daily Opens</Label>
+                <Input
+                  id="daily_open_time"
+                  type="time"
+                  {...register("daily_open_time")}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="daily_close_time" className="text-xs">Daily Closes</Label>
+                <Input
+                  id="daily_close_time"
+                  type="time"
+                  {...register("daily_close_time")}
+                />
+              </div>
+            </div>
+          )}
 
           {initialData && <AuditFieldsView data={initialData} />}
 

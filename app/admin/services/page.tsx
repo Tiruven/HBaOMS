@@ -88,6 +88,11 @@ export default function ServicesPage() {
     service_name: string;
     service_desc?: string | null;
     price: number;
+    service_type: "scheduled" | "on_demand";
+    duration_min: number;
+    daily_open_time: string;
+    daily_close_time: string;
+    capacity: number;
   }) => {
     setIsLoading(true);
     const now = new Date().toISOString();
@@ -116,6 +121,11 @@ export default function ServicesPage() {
             service_name: trimmedName,
             service_desc: values.service_desc,
             price: values.price,
+            service_type: values.service_type,
+            duration_min: values.duration_min,
+            daily_open_time: values.daily_open_time,
+            daily_close_time: values.daily_close_time,
+            capacity: values.capacity,
             updated_by_: currentUserEmail,
             date_updated: now,
           })
@@ -143,6 +153,11 @@ export default function ServicesPage() {
             service_name: trimmedName,
             service_desc: values.service_desc,
             price: values.price,
+            service_type: values.service_type,
+            duration_min: values.duration_min,
+            daily_open_time: values.daily_open_time,
+            daily_close_time: values.daily_close_time,
+            capacity: values.capacity,
             created_by: currentUserEmail,
             date_created: now,
           },
@@ -194,8 +209,13 @@ export default function ServicesPage() {
       ),
     },
     {
-      header: "Description",
-      cell: (row) => <span>{row.service_desc || "No description"}</span>,
+      header: "Type & Capacity",
+      cell: (row) => (
+        <span className="text-xs text-slate-600 capitalize">
+          {row.service_type || "scheduled"} • Cap: {row.capacity || 5}
+          {row.service_type !== "on_demand" && ` • ${row.duration_min || 60}m`}
+        </span>
+      ),
     },
     {
       header: "Price Rate",

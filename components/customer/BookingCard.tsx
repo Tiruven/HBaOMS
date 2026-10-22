@@ -19,6 +19,12 @@ export const BookingCard: React.FC<BookingCardProps> = ({ booking, stay }) => {
         return <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white gap-1 text-xs"><CheckCircle className="h-3 w-3" /> Confirmed</Badge>;
       case "Pending":
         return <Badge className="bg-amber-500 hover:bg-amber-600 text-white gap-1 text-xs"><Clock className="h-3 w-3" /> Pending</Badge>;
+      case "Checked In":
+        return <Badge className="bg-blue-600 hover:bg-blue-700 text-white gap-1 text-xs"><CheckCircle className="h-3 w-3" /> Checked In</Badge>;
+      case "Checked Out":
+        return <Badge className="bg-slate-500 hover:bg-slate-600 text-white gap-1 text-xs"><CheckCircle className="h-3 w-3" /> Checked Out</Badge>;
+      case "No Show":
+        return <Badge className="bg-purple-600 hover:bg-purple-700 text-white gap-1 text-xs"><XCircle className="h-3 w-3" /> No Show</Badge>;
       case "Cancelled":
         return <Badge className="bg-red-500 hover:bg-red-600 text-white gap-1 text-xs"><XCircle className="h-3 w-3" /> Cancelled</Badge>;
       default:
@@ -32,20 +38,6 @@ export const BookingCard: React.FC<BookingCardProps> = ({ booking, stay }) => {
       return (
         <Badge className="bg-purple-100 text-purple-800 border border-purple-300 gap-1 text-xs font-semibold">
           <Bot className="h-3 w-3 text-purple-600" /> Auto Checked Out
-        </Badge>
-      );
-    }
-    if (stayStatus === "Checked Out") {
-      return (
-        <Badge className="bg-slate-100 text-slate-700 border border-slate-300 gap-1 text-xs">
-          <CheckCircle className="h-3 w-3 text-slate-500" /> Checked Out
-        </Badge>
-      );
-    }
-    if (stayStatus === "Checked In") {
-      return (
-        <Badge className="bg-blue-100 text-blue-800 border border-blue-300 gap-1 text-xs font-semibold">
-          <CheckCircle className="h-3 w-3 text-blue-600" /> Checked In
         </Badge>
       );
     }
@@ -115,11 +107,17 @@ export const BookingCard: React.FC<BookingCardProps> = ({ booking, stay }) => {
         )}
 
         {/* Dates and Details Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 text-xs text-slate-600 pt-1">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs text-slate-600 pt-1">
           <div className="bg-slate-50 p-2.5 rounded-xl">
             <span className="text-slate-400 block font-medium text-[11px]">Board Basis</span>
             <span className="font-bold text-[#1A202C] text-sm mt-0.5 block">
               {booking.booking_type === "RO" ? "Room Only (RO)" : booking.booking_type === "HB" ? "Half Board (HB)" : "Full Board (FB)"}
+            </span>
+          </div>
+          <div className="bg-slate-50 p-2.5 rounded-xl">
+            <span className="text-slate-400 block font-medium text-[11px]">Guests</span>
+            <span className="font-bold text-[#1A202C] text-sm mt-0.5 block">
+              {booking.num_adults || 1} Adult{(booking.num_adults || 1) > 1 ? "s" : ""}{booking.num_children ? `, ${booking.num_children} Child${booking.num_children > 1 ? "ren" : ""}` : ""}
             </span>
           </div>
           <div className="bg-slate-50 p-2.5 rounded-xl">
@@ -128,7 +126,7 @@ export const BookingCard: React.FC<BookingCardProps> = ({ booking, stay }) => {
               {stay ? formatDate(stay.check_in_date) : formatDate(booking.booking_date)}
             </span>
           </div>
-          <div className="bg-slate-50 p-2.5 rounded-xl col-span-2 sm:col-span-1">
+          <div className="bg-slate-50 p-2.5 rounded-xl">
             <span className="text-slate-400 block font-medium text-[11px]">Check-Out</span>
             <span className="font-bold text-[#1A202C] text-sm mt-0.5 block">
               {stay ? formatDate(stay.check_out_date) : "N/A"}
@@ -138,16 +136,25 @@ export const BookingCard: React.FC<BookingCardProps> = ({ booking, stay }) => {
       </div>
 
       {/* Footer Action */}
-      <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+      <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-100">
         <div className="text-xs text-slate-500 flex items-center gap-1.5 font-medium">
           <Calendar className="h-3.5 w-3.5 text-[#A37836]" />
           <span>Booked on {formatDate(booking.booking_date)}</span>
         </div>
-        <Button asChild variant="outline" size="sm" className="gap-1 border-[#A37836] text-[#A37836] hover:bg-[#F4EFE6] font-semibold rounded-xl">
-          <Link href={`/customer/bookings/${booking.booking_id}`}>
-            View Receipt <ChevronRight className="h-3.5 w-3.5" />
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          {["Confirmed", "Checked In"].includes(booking.booking_status) && (
+            <Button asChild size="sm" className="gap-1 bg-[#A37836] hover:bg-[#8C6328] text-white font-semibold rounded-xl text-xs">
+              <Link href={`/customer/bookings/${booking.booking_id}/addons`}>
+                <Sparkles className="h-3.5 w-3.5" /> Add Services & Tours
+              </Link>
+            </Button>
+          )}
+          <Button asChild variant="outline" size="sm" className="gap-1 border-[#A37836] text-[#A37836] hover:bg-[#F4EFE6] font-semibold rounded-xl text-xs">
+            <Link href={`/customer/bookings/${booking.booking_id}`}>
+              View Receipt <ChevronRight className="h-3.5 w-3.5" />
+            </Link>
+          </Button>
+        </div>
       </div>
     </div>
   );

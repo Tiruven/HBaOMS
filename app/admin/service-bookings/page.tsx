@@ -6,6 +6,14 @@ import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
 import { ServiceBooking, Service, Booking } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import {
+  nowInstant,
+  mauritiusToday,
+  mauritiusToInstant,
+  startOfMauritiusDay,
+  instantToMauritiusParts,
+  formatMauritius,
+} from "@/lib/time";
 import { SkeletonTable } from "@/components/shared/SkeletonTable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +33,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Search, Trash2, Edit, ConciergeBell, CheckCircle, Clock, XCircle } from "lucide-react";
+import {
+  Plus,
+  Search,
+  Trash2,
+  Edit,
+  ConciergeBell,
+  CheckCircle,
+  Clock,
+  XCircle,
+  AlertCircle,
+  Loader2,
+} from "lucide-react";
 
 export default function ServiceBookingsPage() {
   const { user } = useUser();
@@ -34,14 +53,21 @@ export default function ServiceBookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [feedbackMsg, setFeedbackMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Modal
+  // Edit / Add Modal
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState<boolean>(false);
   const [selectedSB, setSelectedSB] = useState<ServiceBooking | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
-  // Form
+  // Hotel Cancellation Modal
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState<boolean>(false);
+  const [sbToCancel, setSbToCancel] = useState<ServiceBooking | null>(null);
+  const [cancelReason, setCancelReason] = useState<string>("");
+  const [isCancelling, setIsCancelling] = useState<boolean>(false);
+
+  // Form State
   const [bookingId, setBookingId] = useState<string>("");
   const [serviceId, setServiceId] = useState<string>("");
   const [serviceDate, setServiceDate] = useState<string>("");
@@ -49,7 +75,7 @@ export default function ServiceBookingsPage() {
   const [timeOut, setTimeOut] = useState<string>("12:00");
   const [numPerson, setNumPerson] = useState<string>("1");
   const [totalAmount, setTotalAmount] = useState<string>("");
-  const [sbStatus, setSbStatus] = useState<"Pending" | "Confirmed" | "Cancelled" | "Completed">("Pending");
+  const [sbStatus, setSbStatus] = useState<ServiceBooking["sb_status"]>("Pending");
   const [formError, setFormError] = useState<string>("");
 
   useEffect(() => {
@@ -75,28 +101,21 @@ export default function ServiceBookingsPage() {
     }
   };
 
-  const calculateTotal = (sId: string, personsStr: string) => {
-    const s = services.find((srv) => srv.service_id === Number(sId));
-    const count = parseInt(personsStr) || 1;
-    if (s) {
-      setTotalAmount(String((s.price * count).toFixed(2)));
-    }
+  const extractTime = (timeStr: string) => {
+    if (!timeStr) return "10:00";
+    return instantToMauritiusParts(timeStr).timeStr;
   };
 
   const handleOpenAdd = () => {
     setSelectedSB(null);
     setBookingId(bookings.length > 0 ? String(bookings[0].booking_id) : "");
-    const initialS = services.length > 0 ? String(services[0].service_id) : "";
-    setServiceId(initialS);
-    setServiceDate(new Date().toISOString().split("T")[0]);
+    const firstService = services.length > 0 ? services[0] : null;
+    setServiceId(firstService ? String(firstService.service_id) : "");
+    setServiceDate(mauritiusToday());
     setTimeIn("10:00");
-    setTimeOut("12:00");
+    setTimeOut("11:00");
     setNumPerson("1");
-    if (services.length > 0) {
-      setTotalAmount(String(services[0].price.toFixed(2)));
-    } else {
-      setTotalAmount("0.00");
-    }
+    setTotalAmount(firstService ? String(firstService.price) : "0");
     setSbStatus("Pending");
     setFormError("");
     setIsModalOpen(true);
@@ -106,9 +125,9 @@ export default function ServiceBookingsPage() {
     setSelectedSB(sb);
     setBookingId(String(sb.booking_booking_id));
     setServiceId(String(sb.service_service_id));
-    setServiceDate(sb.service_date.split("T")[0]);
-    setTimeIn(sb.time_in);
-    setTimeOut(sb.time_out);
+    setServiceDate(sb.service_date ? instantToMauritiusParts(sb.service_date).dateStr : mauritiusToday());
+    setTimeIn(extractTime(sb.time_in));
+    setTimeOut(extractTime(sb.time_out));
     setNumPerson(String(sb.num_person));
     setTotalAmount(String(sb.total_amount));
     setSbStatus(sb.sb_status);
@@ -116,9 +135,50 @@ export default function ServiceBookingsPage() {
     setIsModalOpen(true);
   };
 
-  const handleOpenDelete = (sb: ServiceBooking) => {
-    setSelectedSB(sb);
-    setIsDeleteOpen(true);
+  const handleOpenCancel = (sb: ServiceBooking) => {
+    setSbToCancel(sb);
+    setCancelReason("Hotel operational / schedule cancellation");
+    setIsCancelModalOpen(true);
+  };
+
+  const handleConfirmCancelSB = async () => {
+    if (!sbToCancel) return;
+    setIsCancelling(true);
+
+    try {
+      const res = await fetch("/api/cancel-addon", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookingId: sbToCancel.booking_booking_id,
+          itemType: "service",
+          itemId: sbToCancel.sb_id,
+          reason: cancelReason || "Hotel-initiated cancellation (100% full refund)",
+          isHotelInitiated: true,
+          userEmail: user?.primaryEmailAddress?.emailAddress || "admin@hbaoms.com",
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to cancel service booking.");
+      }
+
+      setFeedbackMsg({
+        type: "success",
+        text: `Service booking #${sbToCancel.sb_id} cancelled. 100% refund of ${formatCurrency(data.refundAmount)} processed to guest.`,
+      });
+      setIsCancelModalOpen(false);
+      await fetchData();
+    } catch (err: any) {
+      console.error("Cancel service error:", err);
+      setFeedbackMsg({
+        type: "error",
+        text: err.message || "Failed to cancel service booking.",
+      });
+    } finally {
+      setIsCancelling(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -147,14 +207,19 @@ export default function ServiceBookingsPage() {
 
     setIsSaving(true);
     const currentUserEmail = user?.primaryEmailAddress?.emailAddress || "admin@hbaoms.com";
-    const now = new Date().toISOString();
+    const now = nowInstant();
+
+    const serviceDateClean = serviceDate.includes("T") ? serviceDate.split("T")[0] : serviceDate;
+    const timeInInstant = mauritiusToInstant(serviceDateClean, timeIn);
+    const timeOutInstant = mauritiusToInstant(serviceDateClean, timeOut);
+    const serviceDateInstant = startOfMauritiusDay(serviceDateClean);
 
     const payload = {
       booking_booking_id: Number(bookingId),
       service_service_id: Number(serviceId),
-      service_date: serviceDate,
-      time_in: timeIn,
-      time_out: timeOut,
+      service_date: serviceDateInstant,
+      time_in: timeInInstant,
+      time_out: timeOutInstant,
       num_person: persons,
       total_amount: amount,
       sb_status: sbStatus,
@@ -187,21 +252,6 @@ export default function ServiceBookingsPage() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!selectedSB) return;
-    setIsSaving(true);
-    try {
-      const { error } = await supabase.from("service_booking").delete().eq("sb_id", selectedSB.sb_id);
-      if (error) throw error;
-      await fetchData();
-      setIsDeleteOpen(false);
-    } catch (err) {
-      console.error("Delete SB error:", err);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   const filtered = sbList.filter((sb) => {
     const search = searchTerm.toLowerCase();
     const serviceName = (sb.service?.service_name || "").toLowerCase();
@@ -211,14 +261,14 @@ export default function ServiceBookingsPage() {
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case "Confirmed":
-        return <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white gap-1"><CheckCircle className="h-3 w-3" /> Confirmed</Badge>;
-      case "Completed":
-        return <Badge className="bg-blue-600 hover:bg-blue-700 text-white gap-1"><CheckCircle className="h-3 w-3" /> Completed</Badge>;
       case "Pending":
-        return <Badge className="bg-amber-500 hover:bg-amber-600 text-white gap-1"><Clock className="h-3 w-3" /> Pending</Badge>;
+        return <Badge className="bg-amber-500 text-white gap-1"><Clock className="h-3 w-3" /> Pending</Badge>;
+      case "In Progress":
+        return <Badge className="bg-blue-600 text-white gap-1"><Clock className="h-3 w-3" /> In Progress</Badge>;
+      case "Completed":
+        return <Badge className="bg-emerald-500 text-white gap-1"><CheckCircle className="h-3 w-3" /> Completed</Badge>;
       case "Cancelled":
-        return <Badge className="bg-red-500 hover:bg-red-600 text-white gap-1"><XCircle className="h-3 w-3" /> Cancelled</Badge>;
+        return <Badge className="bg-red-500 text-white gap-1"><XCircle className="h-3 w-3" /> Cancelled</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
@@ -227,7 +277,7 @@ export default function ServiceBookingsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
         <div>
           <h1 className="text-2xl font-bold text-navy-900">Service Reservations</h1>
           <p className="text-slate-500 text-sm">Spa, dining, and custom hotel service bookings for guests.</p>
@@ -236,6 +286,21 @@ export default function ServiceBookingsPage() {
           <Plus className="h-4 w-4" /> Book Service
         </Button>
       </div>
+
+      {feedbackMsg && (
+        <div
+          className={`p-4 rounded-xl text-xs font-semibold flex items-center justify-between ${
+            feedbackMsg.type === "success"
+              ? "bg-emerald-50 border border-emerald-200 text-emerald-800"
+              : "bg-red-50 border border-red-200 text-red-700"
+          }`}
+        >
+          <span>{feedbackMsg.text}</span>
+          <button onClick={() => setFeedbackMsg(null)} className="text-slate-400 hover:text-slate-600 font-bold ml-2">
+            ×
+          </button>
+        </div>
+      )}
 
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
@@ -285,18 +350,26 @@ export default function ServiceBookingsPage() {
                       <td className="px-4 py-3 font-medium text-navy-900">{sb.service?.service_name || "Service"}</td>
                       <td className="px-4 py-3 text-slate-600 text-xs">
                         <div>{formatDate(sb.service_date)}</div>
-                        <div className="text-slate-400">{sb.time_in} - {sb.time_out}</div>
+                        <div className="text-slate-400">{formatMauritius(sb.time_in, "time")} to {formatMauritius(sb.time_out, "time")}</div>
                       </td>
                       <td className="px-4 py-3 text-slate-700 font-semibold">{sb.num_person}</td>
                       <td className="px-4 py-3 font-bold text-emerald-600">{formatCurrency(sb.total_amount)}</td>
                       <td className="px-4 py-3">{getStatusBadge(sb.sb_status)}</td>
                       <td className="px-4 py-3 text-right space-x-1">
-                        <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(sb)}>
+                        <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(sb)} title="Edit">
                           <Edit className="h-4 w-4 text-slate-600" />
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleOpenDelete(sb)}>
-                          <Trash2 className="h-4 w-4 text-red-600" />
-                        </Button>
+                        {sb.sb_status !== "Cancelled" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="Cancel Service (100% Refund to Guest)"
+                            onClick={() => handleOpenCancel(sb)}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          >
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -309,7 +382,7 @@ export default function ServiceBookingsPage() {
             {filtered.map((sb) => (
               <div key={sb.sb_id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-2">
                 <div className="flex justify-between items-center">
-                  <span className="font-mono font-bold text-xs text-gold-600">SB #{sb.sb_id}</span>
+                  <span className="font-mono font-bold text-xs text-[#A37836]">SB #{sb.sb_id}</span>
                   {getStatusBadge(sb.sb_status)}
                 </div>
                 <div className="font-bold text-navy-900">{sb.service?.service_name}</div>
@@ -319,7 +392,11 @@ export default function ServiceBookingsPage() {
                 </div>
                 <div className="pt-2 border-t border-slate-100 flex justify-end gap-2">
                   <Button variant="outline" size="sm" onClick={() => handleOpenEdit(sb)}>Edit</Button>
-                  <Button variant="destructive" size="sm" onClick={() => handleOpenDelete(sb)}>Delete</Button>
+                  {sb.sb_status !== "Cancelled" && (
+                    <Button variant="destructive" size="sm" onClick={() => handleOpenCancel(sb)}>
+                      Cancel (100% Refund)
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
@@ -327,7 +404,7 @@ export default function ServiceBookingsPage() {
         </>
       )}
 
-      {/* Modal */}
+      {/* Edit / Add Modal */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent className="sm:max-w-md w-full">
           <DialogHeader>
@@ -337,13 +414,13 @@ export default function ServiceBookingsPage() {
             {formError && <p className="text-xs font-semibold text-red-600 bg-red-50 p-2 rounded">{formError}</p>}
 
             <div className="space-y-2">
-              <Label>Select Booking *</Label>
-              <Select value={bookingId} onValueChange={setBookingId}>
-                <SelectTrigger><SelectValue placeholder="Choose booking..." /></SelectTrigger>
+              <Label>Select Reservation *</Label>
+              <Select value={bookingId} onValueChange={setBookingId} disabled={!!selectedSB}>
+                <SelectTrigger><SelectValue placeholder="Select booking..." /></SelectTrigger>
                 <SelectContent>
                   {bookings.map((b) => (
                     <SelectItem key={b.booking_id} value={String(b.booking_id)}>
-                      Booking #{b.booking_id} - {b.customer ? `${b.customer.cust_fname} ${b.customer.cust_lname}` : "Guest"}
+                      #{b.booking_id} - {b.customer ? `${b.customer.cust_fname} ${b.customer.cust_lname}` : "Guest"}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -356,10 +433,11 @@ export default function ServiceBookingsPage() {
                 value={serviceId}
                 onValueChange={(val) => {
                   setServiceId(val);
-                  calculateTotal(val, numPerson);
+                  const found = services.find((s) => s.service_id === Number(val));
+                  if (found) setTotalAmount(String(found.price * (parseInt(numPerson) || 1)));
                 }}
               >
-                <SelectTrigger><SelectValue placeholder="Choose service..." /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Select service..." /></SelectTrigger>
                 <SelectContent>
                   {services.map((s) => (
                     <SelectItem key={s.service_id} value={String(s.service_id)}>
@@ -370,24 +448,9 @@ export default function ServiceBookingsPage() {
               </Select>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Service Date *</Label>
-                <Input type="date" value={serviceDate} onChange={(e) => setServiceDate(e.target.value)} required />
-              </div>
-              <div className="space-y-2">
-                <Label>Num Persons *</Label>
-                <Input
-                  type="number"
-                  min="1"
-                  value={numPerson}
-                  onChange={(e) => {
-                    setNumPerson(e.target.value);
-                    calculateTotal(serviceId, e.target.value);
-                  }}
-                  required
-                />
-              </div>
+            <div className="space-y-2">
+              <Label>Service Date *</Label>
+              <Input type="date" value={serviceDate} onChange={(e) => setServiceDate(e.target.value)} required />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -403,6 +466,23 @@ export default function ServiceBookingsPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
+                <Label>Number of Persons *</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={numPerson}
+                  onChange={(e) => {
+                    const np = e.target.value;
+                    setNumPerson(np);
+                    const found = services.find((s) => s.service_id === Number(serviceId));
+                    if (found) setTotalAmount(String(found.price * (parseInt(np) || 1)));
+                  }}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
                 <Label>Total Amount (MUR) *</Label>
                 <Input
                   type="number"
@@ -412,43 +492,71 @@ export default function ServiceBookingsPage() {
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Booking Status *</Label>
-                <Select value={sbStatus} onValueChange={(val: any) => setSbStatus(val)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Pending">Pending</SelectItem>
-                    <SelectItem value="Confirmed">Confirmed</SelectItem>
-                    <SelectItem value="Cancelled">Cancelled</SelectItem>
-                    <SelectItem value="Completed">Completed</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
 
-            <DialogFooter className="pt-4">
+            <div className="space-y-2">
+              <Label>Booking Status *</Label>
+              <Select value={sbStatus} onValueChange={(val: any) => setSbStatus(val)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Pending">Pending</SelectItem>
+                  <SelectItem value="In Progress">In Progress</SelectItem>
+                  <SelectItem value="Completed">Completed</SelectItem>
+                  <SelectItem value="Cancelled">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <DialogFooter className="pt-2">
               <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>Cancel</Button>
               <Button type="submit" variant="gold" disabled={isSaving}>
-                {isSaving ? "Saving..." : selectedSB ? "Update Booking" : "Save Reservation"}
+                {isSaving ? "Saving..." : selectedSB ? "Save Changes" : "Confirm Booking"}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Delete Dialog */}
-      <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
-        <DialogContent className="sm:max-w-sm">
+      {/* Hotel Cancellation with 100% Refund Dialog */}
+      <Dialog open={isCancelModalOpen} onOpenChange={setIsCancelModalOpen}>
+        <DialogContent className="sm:max-w-md w-full">
           <DialogHeader>
-            <DialogTitle>Confirm Delete Service Booking</DialogTitle>
+            <DialogTitle className="text-red-800 flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-red-600" /> Cancel Service Booking #{sbToCancel?.sb_id}
+            </DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-slate-600">
-            Delete service booking <strong>#{selectedSB?.sb_id}</strong> for {selectedSB?.service?.service_name}?
-          </p>
-          <DialogFooter className="pt-4">
-            <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={isSaving}>
-              {isSaving ? "Deleting..." : "Delete"}
+
+          <div className="space-y-3 text-xs py-2">
+            <div className="bg-red-50 border border-red-200 p-3 rounded-xl text-red-800 space-y-1">
+              <span className="font-bold block">Hotel-Initiated Cancellation (100% Refund):</span>
+              <p>
+                Cancelling this service reservation will immediately issue a <strong>100% full refund</strong> of {formatCurrency(sbToCancel?.total_amount || 0)} to the guest via Stripe and record the refund entry.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="font-bold">Cancellation Reason</Label>
+              <Input
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="e.g. Spa maintenance, specialist unavailable"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="pt-2">
+            <Button type="button" variant="outline" onClick={() => setIsCancelModalOpen(false)} disabled={isCancelling}>
+              Keep Booking
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleConfirmCancelSB}
+              disabled={isCancelling}
+              className="gap-2"
+            >
+              {isCancelling && <Loader2 className="h-4 w-4 animate-spin" />}
+              {isCancelling ? "Processing Refund..." : "Confirm & Refund 100%"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { UserButton, useUser, SignOutButton } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
+import { nowInstant } from "@/lib/time";
 import { Hotel, BedDouble, Calendar, User, Sparkles, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -56,7 +57,7 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
               nationality: "Mauritian",
               country: "Mauritius",
               created_by: "Clerk AutoSync",
-              date_created: new Date().toISOString(),
+              date_created: nowInstant(),
             },
           ]);
         }

@@ -23,6 +23,8 @@ export default function CustomerBookingsListPage() {
   const [verifyStatus, setVerifyStatus] = useState<"idle" | "verifying" | "success" | "error">("idle");
   const [verifyMessage, setVerifyMessage] = useState<string>("");
 
+  const [confirmedBookingId, setConfirmedBookingId] = useState<number | null>(null);
+
   const fetchBookings = useCallback(async () => {
     if (!user?.primaryEmailAddress?.emailAddress) return;
     setLoading(true);
@@ -97,6 +99,9 @@ export default function CustomerBookingsListPage() {
 
           if (res.ok && data.success) {
             setVerifyStatus("success");
+            if (data.bookingId) {
+              setConfirmedBookingId(Number(data.bookingId));
+            }
             setVerifyMessage(
               data.alreadyProcessed
                 ? "Your booking was already confirmed!"
@@ -160,9 +165,18 @@ export default function CustomerBookingsListPage() {
         </div>
       )}
       {verifyStatus === "success" && (
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-5 rounded-2xl flex items-center gap-3 text-sm font-semibold">
-          <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0" />
-          <span>{verifyMessage}</span>
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm font-semibold">
+          <div className="flex items-center gap-3">
+            <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0" />
+            <span>{verifyMessage}</span>
+          </div>
+          {confirmedBookingId && (
+            <Button asChild className="bg-[#A37836] hover:bg-[#8B6327] text-white rounded-xl text-xs gap-2 shrink-0">
+              <Link href={`/customer/bookings/${confirmedBookingId}/addons`}>
+                Add services and tours to your stay
+              </Link>
+            </Button>
+          )}
         </div>
       )}
       {verifyStatus === "error" && (

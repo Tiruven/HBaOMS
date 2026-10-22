@@ -6,6 +6,12 @@ import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
 import { MaintenanceRequest, Room } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
+import {
+  nowInstant,
+  mauritiusToday,
+  startOfMauritiusDay,
+  instantToMauritiusParts,
+} from "@/lib/time";
 import { SkeletonTable } from "@/components/shared/SkeletonTable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,7 +51,7 @@ export default function MaintenancePage() {
   const [roomId, setRoomId] = useState<string>("");
   const [mrDesc, setMrDesc] = useState<string>("");
   const [priority, setPriority] = useState<"Low" | "Medium" | "High" | "Urgent">("Medium");
-  const [requestStatus, setRequestStatus] = useState<"Open" | "In Progress" | "Resolved">("Open");
+  const [requestStatus, setRequestStatus] = useState<MaintenanceRequest["request_status"]>("Open");
   const [requestDate, setRequestDate] = useState<string>("");
   const [formError, setFormError] = useState<string>("");
 
@@ -80,7 +86,7 @@ export default function MaintenancePage() {
     setMrDesc("");
     setPriority("Medium");
     setRequestStatus("Open");
-    setRequestDate(new Date().toISOString().split("T")[0]);
+    setRequestDate(mauritiusToday());
     setFormError("");
     setIsModalOpen(true);
   };
@@ -91,7 +97,7 @@ export default function MaintenancePage() {
     setMrDesc(mr.mr_desc || "");
     setPriority(mr.priority);
     setRequestStatus(mr.request_status);
-    setRequestDate(mr.request_date ? mr.request_date.split("T")[0] : new Date().toISOString().split("T")[0]);
+    setRequestDate(mr.request_date ? instantToMauritiusParts(mr.request_date).dateStr : mauritiusToday());
     setFormError("");
     setIsModalOpen(true);
   };
@@ -109,7 +115,7 @@ export default function MaintenancePage() {
         .update({
           request_status: newStatus,
           updated_by_: currentUserEmail,
-          date_updated: new Date().toISOString(),
+          date_updated: nowInstant(),
         })
         .eq("maintenance_id", id);
 
@@ -131,8 +137,9 @@ export default function MaintenancePage() {
 
     setIsSaving(true);
     const currentUserEmail = user?.primaryEmailAddress?.emailAddress || "admin@hbaoms.com";
-    const now = new Date().toISOString();
+    const now = nowInstant();
     const reqDateClean = requestDate.includes("T") ? requestDate.split("T")[0] : requestDate;
+    const reqDateInstant = startOfMauritiusDay(reqDateClean);
 
     try {
       if (selectedMR) {
@@ -144,7 +151,7 @@ export default function MaintenancePage() {
             mr_desc: mrDesc,
             priority,
             request_status: requestStatus,
-            request_date: `${reqDateClean}T00:00:00`,
+            request_date: reqDateInstant,
             updated_by_: currentUserEmail,
             date_updated: now,
           })
@@ -158,7 +165,7 @@ export default function MaintenancePage() {
             mr_desc: mrDesc,
             priority,
             request_status: requestStatus,
-            request_date: `${reqDateClean}T00:00:00`,
+            request_date: reqDateInstant,
             created_by: currentUserEmail,
             date_created: now,
             updated_by_: currentUserEmail,

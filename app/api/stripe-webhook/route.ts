@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabase } from "@/lib/supabaseClient";
+import { nowInstant, mauritiusToday, mauritiusToInstant, startOfMauritiusDay } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
@@ -32,21 +33,103 @@ export async function POST(req: Request) {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
     const metadata = session.metadata || {};
-
-    const {
-      roomId,
-      checkInDate,
-      checkOutDate,
-      boardType,
-      guestEmail,
-      guestFname,
-      guestLname,
-      services,
-      tours,
-    } = metadata;
+    const amountPaid = (session.amount_total || 0) / 100;
+    const today = mauritiusToday();
 
     try {
-      // 0. Idempotency check — skip if already processed
+      // Branch on add-on vs new booking
+      if (metadata.type === "addon") {
+        const bookingId = Number(metadata.bookingId);
+        const guestEmail = metadata.guestEmail || "guest@hbaoms.com";
+
+        // Idempotency check on payment table
+        const { data: existingPayment } = await supabase
+          .from("payment")
+          .select("payment_id")
+          .eq("stripe_session_id", session.id)
+          .maybeSingle();
+
+        if (existingPayment) {
+          console.log(`Add-on payment for session ${session.id} already exists, skipping webhook.`);
+          return NextResponse.json({ received: true });
+        }
+
+        const { data: newPay, error: pErr } = await supabase
+          .from("payment")
+          .insert([
+            {
+              booking_booking_id: bookingId,
+              payment_date: today,
+              payment_type: "Addon",
+              payment_method: "ON",
+              payment_amount: amountPaid,
+              stripe_session_id: session.id,
+              created_by: guestEmail,
+              date_created: new Date().toISOString(),
+            },
+          ])
+          .select("payment_id")
+          .single();
+
+        if (pErr || !newPay) {
+          console.error("Webhook add-on payment error:", pErr);
+          return NextResponse.json({ received: true });
+        }
+
+        const paymentId = newPay.payment_id;
+        const serviceBookings = metadata.serviceBookings ? JSON.parse(metadata.serviceBookings) : [];
+        const tripBookings = metadata.tripBookings ? JSON.parse(metadata.tripBookings) : [];
+
+        for (const s of serviceBookings) {
+          await supabase.from("service_booking").insert([
+            {
+              booking_booking_id: bookingId,
+              service_service_id: Number(s.serviceId),
+              service_date: s.serviceDate,
+              time_in: s.timeIn,
+              time_out: s.timeOut,
+              num_person: Number(s.numPerson) || 1,
+              total_amount: Number(s.amount) || 0,
+              sb_status: "Pending",
+              payment_id: paymentId,
+              created_by: guestEmail,
+              date_created: new Date().toISOString(),
+            },
+          ]);
+        }
+
+        for (const t of tripBookings) {
+          await supabase.from("trip_booking").insert([
+            {
+              trip_trip_id: Number(t.tripId),
+              booking_booking_id: bookingId,
+              num_adult: Number(t.numAdult) || 0,
+              num_child: Number(t.numChild) || 0,
+              total_amount: Number(t.amount) || 0,
+              payment_id: paymentId,
+            },
+          ]);
+        }
+
+        return NextResponse.json({ received: true });
+      }
+
+      // Default: Flow 1 (New Room Booking)
+      const {
+        roomId,
+        checkInDate,
+        checkOutDate,
+        boardType,
+        guestEmail,
+        guestFname,
+        guestLname,
+        numAdults,
+        numChildren,
+        services,
+        tours,
+      } = metadata;
+
+      // Idempotency check — skip if already processed
       const { data: existingBooking } = await supabase
         .from("booking")
         .select("booking_id")
@@ -58,7 +141,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ received: true });
       }
 
-      // 1. Get or create customer record
+      // Get or create customer record
       let custId: number;
       const { data: existingCust } = await supabase
         .from("customer")
@@ -94,10 +177,7 @@ export async function POST(req: Request) {
         custId = newCust.cust_id;
       }
 
-      // 2. Insert booking row
-      const amountPaid = (session.amount_total || 0) / 100;
-      const today = new Date().toISOString().split("T")[0];
-
+      // Insert booking row
       const { data: newBooking, error: bErr } = await supabase
         .from("booking")
         .insert([
@@ -107,6 +187,8 @@ export async function POST(req: Request) {
             booking_type: boardType || "RO",
             booking_status: "Confirmed",
             stripe_session_id: session.id,
+            num_adults: Number(numAdults) || 1,
+            num_children: Number(numChildren) || 0,
             created_by: guestEmail || "Stripe Webhook",
             date_created: new Date().toISOString(),
           },
@@ -117,9 +199,9 @@ export async function POST(req: Request) {
       if (bErr) throw bErr;
       const bookingId = newBooking.booking_id;
 
-      // 3. Insert stay row in check_in_out
+      // Insert stay row in check_in_out
       if (roomId && checkInDate && checkOutDate) {
-        const { error: cioErr } = await supabase.from("check_in_out").insert([
+        await supabase.from("check_in_out").insert([
           {
             booking_booking_id: bookingId,
             room_room_id: Number(roomId),
@@ -130,134 +212,36 @@ export async function POST(req: Request) {
             date_created: new Date().toISOString(),
           },
         ]);
-        if (cioErr) {
-          console.warn("Webhook check_in_out insert error, trying fallback with core columns:", cioErr.message);
-          const { error: fallbackErr } = await supabase.from("check_in_out").insert([
-            {
-              booking_booking_id: bookingId,
-              room_room_id: Number(roomId),
-              check_in_date: checkInDate,
-              check_out_date: checkOutDate,
-            },
-          ]);
-          if (fallbackErr) {
-            console.error("Webhook check_in_out fallback error:", fallbackErr.message);
-          }
-        }
       }
 
-      // 3b. Insert service bookings
-      const selectedServices = services ? JSON.parse(services) : [];
-      if (selectedServices && Array.isArray(selectedServices) && selectedServices.length > 0) {
-        for (const srvId of selectedServices) {
-          const { data: srv } = await supabase
-            .from("service")
-            .select("price")
-            .eq("service_id", Number(srvId))
-            .maybeSingle();
-
-          const srvPrice = srv?.price || 0;
-          await supabase.from("service_booking").insert([
-            {
-              booking_booking_id: bookingId,
-              service_service_id: Number(srvId),
-              service_date: checkInDate || today,
-              time_in: `${checkInDate || today}T10:00:00.000Z`,
-              time_out: `${checkInDate || today}T11:00:00.000Z`,
-              num_person: 1,
-              total_amount: srvPrice,
-              sb_status: "Confirmed",
-              created_by: "Stripe Webhook",
-              date_created: new Date().toISOString(),
-            },
-          ]);
-        }
-      }
-
-      // 3c. Insert trip bookings
-      const selectedTours = tours ? JSON.parse(tours) : [];
-      if (selectedTours && Array.isArray(selectedTours) && selectedTours.length > 0) {
-        for (const tourId of selectedTours) {
-          const { data: tourData } = await supabase
-            .from("tour")
-            .select("adult_price")
-            .eq("tour_id", Number(tourId))
-            .maybeSingle();
-
-          const adultPrice = tourData?.adult_price || 0;
-
-          const { data: existingTrip } = await supabase
-            .from("trip")
-            .select("trip_id")
-            .eq("tour_tour_id", Number(tourId))
-            .eq("trip_status", "Scheduled")
-            .limit(1)
-            .maybeSingle();
-
-          let tripId: number;
-          if (existingTrip) {
-            tripId = existingTrip.trip_id;
-          } else {
-            const { data: newTrip, error: tErr } = await supabase
-              .from("trip")
-              .insert({
-                tour_tour_id: Number(tourId),
-                trip_date: `${checkInDate || today}T09:00:00.000Z`,
-                start_time: `${checkInDate || today}T09:00:00.000Z`,
-                return_time: `${checkInDate || today}T17:00:00.000Z`,
-                trip_status: "Scheduled",
-                created_by: "Stripe Webhook",
-              })
-              .select("trip_id")
-              .single();
-
-            if (tErr || !newTrip) {
-              console.error("Failed to create webhook trip for tour:", tourId, tErr);
-              continue;
-            }
-            tripId = newTrip.trip_id;
-          }
-
-          await supabase.from("trip_booking").insert({
-            trip_trip_id: tripId,
+      // Insert payment row
+      const { data: payRow } = await supabase
+        .from("payment")
+        .insert([
+          {
             booking_booking_id: bookingId,
-            num_adult: 1,
-            num_child: 0,
-            total_amount: adultPrice,
-          });
-        }
-      }
+            payment_date: today,
+            payment_type: "Booking",
+            payment_method: "ON",
+            payment_amount: amountPaid,
+            stripe_session_id: session.id,
+            created_by: guestEmail || "Stripe Webhook",
+            date_created: new Date().toISOString(),
+          },
+        ])
+        .select("payment_id")
+        .single();
 
-      // 4. Record Payment
-      await supabase.from("payment").insert([
-        {
-          booking_booking_id: bookingId,
-          payment_date: today,
-          payment_type: "Stripe",
-          payment_method: "ON",
-          payment_amount: amountPaid,
-          amount_paid: amountPaid,
-          created_by: guestEmail || "Stripe Webhook",
-          date_created: new Date().toISOString(),
-        },
-      ]);
+      const paymentId = payRow?.payment_id;
 
-      // 5. System Notification Record
-      await supabase.from("notification").insert([
-        {
-          customer_cust_id: custId,
-          booking_booking_id: bookingId,
-          notif_type: "Booking Confirmation",
-          notif_status: "Pending",
-          sent_date: new Date().toISOString(),
-          created_by: "Stripe Webhook",
-          date_created: new Date().toISOString(),
-        },
-      ]);
+      // Note: Per v5.1, Flow 1 wizard handles room, board plan, and packages only.
+      // All services and tours/trips are booked post-confirmation in the client portal.
 
-      console.log(`Successfully created booking #${bookingId} via Stripe Webhook for ${guestEmail}`);
-    } catch (err) {
-      console.error("Error processing checkout.session.completed webhook:", err);
+      console.log(`Webhook successfully processed session: ${session.id} for booking: ${bookingId}`);
+      return NextResponse.json({ received: true });
+    } catch (err: any) {
+      console.error("Error processing webhook event:", err);
+      return NextResponse.json({ error: "Webhook handler failed" }, { status: 500 });
     }
   }
 

@@ -16,17 +16,8 @@ export function formatCurrency(amount: number | string | undefined | null): stri
   })}`;
 }
 
+import { formatMauritius } from "@/lib/time";
+
 export function formatDate(dateString: string | Date | undefined | null): string {
-  if (!dateString) return "N/A";
-  try {
-    const d = new Date(dateString);
-    if (isNaN(d.getTime())) return "N/A";
-    const day = String(d.getDate()).padStart(2, "0");
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const month = months[d.getMonth()];
-    const year = d.getFullYear();
-    return `${day}-${month}-${year}`;
-  } catch {
-    return "N/A";
-  }
+  return formatMauritius(dateString, "date");
 }

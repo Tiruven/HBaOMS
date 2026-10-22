@@ -6,6 +6,13 @@ import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
 import { PricingRule, RoomType } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
+import {
+  nowInstant,
+  mauritiusToday,
+  addDaysToMauritiusDate,
+  startOfMauritiusDay,
+  endOfMauritiusDay,
+} from "@/lib/time";
 import { SkeletonTable } from "@/components/shared/SkeletonTable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -72,8 +79,8 @@ export default function PricingRulesPage() {
   const handleOpenAdd = () => {
     setSelectedPR(null);
     setRoomTypeId(roomTypes.length > 0 ? String(roomTypes[0].room_type_id) : "");
-    const today = new Date().toISOString().split("T")[0];
-    const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
+    const today = mauritiusToday();
+    const nextWeek = addDaysToMauritiusDate(today, 7);
     setStartDate(today);
     setEndDate(nextWeek);
     setRateOverride("20");
@@ -111,7 +118,7 @@ export default function PricingRulesPage() {
       setInlineError("Start date and end date are required.");
       return;
     }
-    if (new Date(endDate) < new Date(startDate)) {
+    if (endDate < startDate) {
       setInlineError("End date must be on or after start date.");
       return;
     }
@@ -131,7 +138,9 @@ export default function PricingRulesPage() {
 
       const hasOverlap = (existingRules || []).some((r) => {
         if (selectedPR && r.pr_id === selectedPR.pr_id) return false;
-        return new Date(startDate) <= new Date(r.end_date) && new Date(endDate) >= new Date(r.start_date);
+        const rStart = r.start_date.split("T")[0];
+        const rEnd = r.end_date.split("T")[0];
+        return startDate <= rEnd && endDate >= rStart;
       });
 
       if (hasOverlap) {
@@ -141,15 +150,18 @@ export default function PricingRulesPage() {
 
       setIsSaving(true);
       const currentUserEmail = user?.primaryEmailAddress?.emailAddress || "admin@hbaoms.com";
-      const now = new Date().toISOString();
+      const now = nowInstant();
+
+      const startInstant = startOfMauritiusDay(startDate);
+      const endInstant = endOfMauritiusDay(endDate);
 
       if (selectedPR) {
         const { error } = await supabase
           .from("pricing_rule")
           .update({
             room_type_room_type_id: Number(roomTypeId),
-            start_date: startDate,
-            end_date: endDate,
+            start_date: startInstant,
+            end_date: endInstant,
             rate_override: numRate,
             reason,
             updated_by_: currentUserEmail,
@@ -162,8 +174,8 @@ export default function PricingRulesPage() {
         const { error } = await supabase.from("pricing_rule").insert([
           {
             room_type_room_type_id: Number(roomTypeId),
-            start_date: startDate,
-            end_date: endDate,
+            start_date: startInstant,
+            end_date: endInstant,
             rate_override: numRate,
             reason,
             created_by: currentUserEmail,

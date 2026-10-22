@@ -12,6 +12,8 @@ export interface RoomType extends AuditFields {
   type: string;
   price: number;
   size: number;
+  max_adults?: number;
+  max_children?: number;
 }
 
 export interface Feature extends AuditFields {
@@ -34,6 +36,11 @@ export interface Service extends AuditFields {
   service_name: string;
   service_desc?: string | null;
   price: number;
+  duration_min?: number;
+  daily_open_time?: string;
+  daily_close_time?: string;
+  capacity?: number;
+  service_type?: "scheduled" | "on_demand";
 }
 
 export interface Tour extends AuditFields {
@@ -82,10 +89,14 @@ export interface Customer extends AuditFields {
 export interface Booking extends AuditFields {
   booking_id: number;
   booking_date: string;
-  booking_status: "Pending" | "Confirmed" | "Cancelled";
+  booking_status: "Pending" | "Confirmed" | "Checked In" | "Checked Out" | "Cancelled" | "No Show";
   booking_type: "RO" | "HB" | "FB";
   customer_cust_id: number;
   stripe_session_id?: string | null;
+  num_adults?: number;
+  num_children?: number;
+  cancellation_reason?: string | null;
+  cancelled_at?: string | null;
   customer?: Customer;
 }
 
@@ -101,6 +112,24 @@ export interface CheckInOut extends AuditFields {
   booking?: Booking;
 }
 
+export interface Refund extends AuditFields {
+  refund_id: number;
+  payment_payment_id: number;
+  booking_booking_id: number;
+  stripe_refund_id?: string | null;
+  refund_amount: number;
+  refund_reason?: string | null;
+  refund_status: "Pending" | "Completed" | "Failed";
+  refund_date: string;
+  item_type?: "room" | "service" | "trip";
+  service_booking_id?: number | null;
+  trip_trip_id?: number | null;
+  refund_percentage?: number;
+  vat_amount?: number;
+  payment?: Payment;
+  booking?: Booking;
+}
+
 export interface Payment extends AuditFields {
   payment_id: number;
   pay_id?: number;
@@ -110,7 +139,9 @@ export interface Payment extends AuditFields {
   payment_method: string;
   payment_type?: string;
   booking_booking_id: number;
+  stripe_session_id?: string | null;
   booking?: Booking;
+  refunds?: Refund[];
 }
 
 export interface Notification extends AuditFields {
@@ -130,7 +161,7 @@ export interface MaintenanceRequest extends AuditFields {
   request_date: string;
   mr_desc: string;
   priority: "Low" | "Medium" | "High" | "Urgent";
-  request_status: "Open" | "In Progress" | "Resolved";
+  request_status: "Pending" | "In Progress" | "Completed" | "Cancelled" | "Open" | "Resolved";
   room_room_id: number;
   room?: Room;
 }
@@ -159,11 +190,15 @@ export interface ServiceBooking extends AuditFields {
   time_out: string;
   num_person: number;
   total_amount: number;
-  sb_status: "Pending" | "Confirmed" | "Cancelled" | "Completed";
+  sb_status: "Pending" | "In Progress" | "Completed" | "Cancelled" | "Confirmed";
   booking_booking_id: number;
   service_service_id: number;
+  payment_id?: number | null;
+  cancelled_at?: string | null;
+  cancellation_reason?: string | null;
   booking?: Booking;
   service?: Service;
+  payment?: Payment;
 }
 
 export interface Trip extends AuditFields {
@@ -171,20 +206,26 @@ export interface Trip extends AuditFields {
   trip_date: string;
   start_time: string;
   return_time: string;
-  trip_status: "Scheduled" | "Ongoing" | "Completed" | "Cancelled";
+  trip_status: "Pending" | "In Progress" | "Completed" | "Cancelled" | "Scheduled" | "Ongoing";
   tour_tour_id: number;
+  capacity?: number;
   tour?: Tour;
 }
 
 export interface TripBooking extends AuditFields {
-  tb_id: number;
+  tb_id?: number;
   num_adult: number;
   num_child: number;
   total_amount: number;
   trip_trip_id: number;
   booking_booking_id: number;
+  payment_id?: number | null;
+  tb_status?: "Pending" | "In Progress" | "Completed" | "Cancelled";
+  cancelled_at?: string | null;
+  cancellation_reason?: string | null;
   trip?: Trip;
   booking?: Booking;
+  payment?: Payment;
 }
 
 export interface SystemStats {

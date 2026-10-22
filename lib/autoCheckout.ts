@@ -21,13 +21,20 @@ export interface AutoCheckoutResult {
  * 1. Guests who checked in but never checked out before end of stay.
  * 2. Guests who never checked in (no-shows) whose stay duration has now passed.
  */
+import {
+  nowInstant,
+  mauritiusToday,
+  instantToMauritiusParts,
+  DEFAULT_CHECKOUT_CUTOFF,
+} from "@/lib/time";
+
 export async function runAutoCheckout(): Promise<AutoCheckoutResult> {
   try {
-    const todayStr = new Date().toISOString().split("T")[0];
-    const nowIso = new Date().toISOString();
+    const todayStr = mauritiusToday();
+    const nowIso = nowInstant();
+    const nowParts = instantToMauritiusParts(nowIso);
 
-    // Find all check_in_out stays where check_out_date is in the past (<= todayStr or < todayStr)
-    // and status is not already 'Checked Out' or 'Auto Checked Out'
+    // Query stays scheduled up to today in Mauritius time
     const { data: overdueStays, error: fetchError } = await supabase
       .from("check_in_out")
       .select("*, booking(*, customer(*))")
@@ -43,9 +50,23 @@ export async function runAutoCheckout(): Promise<AutoCheckoutResult> {
     }
 
     // Filter stays that are NOT already checked out or auto checked out
+    // and verify that the checkout cutoff (12:00 Mauritius time) has actually passed if checkout is today
     const candidates = overdueStays.filter((stay: CheckInOut) => {
       const status = stay.status || "Scheduled";
-      return status !== "Checked Out" && status !== "Auto Checked Out";
+      if (status === "Checked Out" || status === "Auto Checked Out") {
+        return false;
+      }
+
+      const stayOutParts = instantToMauritiusParts(stay.check_out_date);
+      // Strictly past if checkout date was before today in Mauritius
+      if (stayOutParts.dateStr < todayStr) {
+        return true;
+      }
+      // If checkout date is today, check if Mauritius time has reached the 12:00 cutoff
+      if (stayOutParts.dateStr === todayStr) {
+        return nowParts.timeStr >= DEFAULT_CHECKOUT_CUTOFF;
+      }
+      return false;
     });
 
     if (candidates.length === 0) {

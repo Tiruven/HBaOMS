@@ -22,6 +22,8 @@ const roomTypeSchema = z.object({
   type: z.string().trim().min(1, "Room type is required").max(100, "Max 100 characters"),
   price: z.coerce.number().positive("Price must be greater than 0"),
   size: z.coerce.number().positive("Size must be greater than 0"),
+  max_adults: z.coerce.number().int().min(1, "At least 1 adult required"),
+  max_children: z.coerce.number().int().min(0, "Cannot be negative"),
 });
 
 type RoomTypeFormValues = z.infer<typeof roomTypeSchema>;
@@ -54,6 +56,8 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
       type: "",
       price: 100,
       size: 30,
+      max_adults: 2,
+      max_children: 2,
     },
   });
 
@@ -64,12 +68,16 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
         type: initialData.type,
         price: initialData.price,
         size: initialData.size,
+        max_adults: initialData.max_adults || 2,
+        max_children: initialData.max_children ?? 2,
       });
     } else {
       reset({
         type: "",
         price: 100,
         size: 30,
+        max_adults: 2,
+        max_children: 2,
       });
     }
   }, [initialData, reset, isOpen]);
@@ -143,6 +151,36 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
               />
               {errors.size && (
                 <p className="text-xs text-red-600 font-medium">{errors.size.message}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="max_adults">Max Adults *</Label>
+              <Input
+                id="max_adults"
+                type="number"
+                min="1"
+                placeholder="2"
+                {...register("max_adults")}
+              />
+              {errors.max_adults && (
+                <p className="text-xs text-red-600 font-medium">{errors.max_adults.message}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="max_children">Max Children (under 12) *</Label>
+              <Input
+                id="max_children"
+                type="number"
+                min="0"
+                placeholder="2"
+                {...register("max_children")}
+              />
+              {errors.max_children && (
+                <p className="text-xs text-red-600 font-medium">{errors.max_children.message}</p>
               )}
             </div>
           </div>

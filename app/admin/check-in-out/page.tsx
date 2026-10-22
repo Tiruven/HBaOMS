@@ -7,6 +7,13 @@ import { supabase } from "@/lib/supabaseClient";
 import { CheckInOut, Room, Booking } from "@/lib/types";
 import { formatDate, cn } from "@/lib/utils";
 import { runAutoCheckout } from "@/lib/autoCheckout";
+import {
+  nowInstant,
+  mauritiusToday,
+  addDaysToMauritiusDate,
+  mauritiusToInstant,
+  DEFAULT_CHECKOUT_CUTOFF,
+} from "@/lib/time";
 import { SkeletonTable } from "@/components/shared/SkeletonTable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -109,8 +116,8 @@ export default function CheckInOutPage() {
     setSelectedStay(null);
     setRoomId(rooms.length > 0 ? String(rooms[0].room_id) : "");
     setBookingId(bookings.length > 0 ? String(bookings[0].booking_id) : "");
-    const todayStr = new Date().toISOString().split("T")[0];
-    const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split("T")[0];
+    const todayStr = mauritiusToday();
+    const tomorrowStr = addDaysToMauritiusDate(todayStr, 1);
     setCheckInDate(todayStr);
     setCheckOutDate(tomorrowStr);
     setInlineError("");
@@ -134,7 +141,7 @@ export default function CheckInOutPage() {
       setInlineError("Please select valid check-in and check-out dates.");
       return;
     }
-    if (new Date(checkOutDate) <= new Date(checkInDate)) {
+    if (checkOutDate <= checkInDate) {
       setInlineError("Check-out date must be strictly after check-in date.");
       return;
     }
@@ -169,14 +176,17 @@ export default function CheckInOutPage() {
 
       setIsSaving(true);
       const currentUserEmail = user?.primaryEmailAddress?.emailAddress || "admin@hbaoms.com";
-      const now = new Date().toISOString();
+      const now = nowInstant();
+
+      const formattedIn = checkInDate.includes("T") ? checkInDate : mauritiusToInstant(checkInDate, "14:00:00");
+      const formattedOut = checkOutDate.includes("T") ? checkOutDate : mauritiusToInstant(checkOutDate, DEFAULT_CHECKOUT_CUTOFF + ":00");
 
       const { error: insertError } = await supabase.from("check_in_out").insert([
         {
           room_room_id: Number(roomId),
           booking_booking_id: Number(bookingId),
-          check_in_date: checkInDate,
-          check_out_date: checkOutDate,
+          check_in_date: formattedIn,
+          check_out_date: formattedOut,
           created_by: currentUserEmail,
           date_created: now,
           updated_by_: currentUserEmail,
@@ -218,7 +228,7 @@ export default function CheckInOutPage() {
 
   const handleCheckIn = async (stay: CheckInOut) => {
     try {
-      const now = new Date().toISOString();
+      const now = nowInstant();
       const { error } = await supabase
         .from("check_in_out")
         .update({
@@ -238,7 +248,7 @@ export default function CheckInOutPage() {
 
   const handleCheckOut = async (stay: CheckInOut) => {
     try {
-      const now = new Date().toISOString();
+      const now = nowInstant();
       const { error } = await supabase
         .from("check_in_out")
         .update({

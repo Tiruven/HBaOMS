@@ -5,7 +5,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { Booking, CheckInOut, Payment, ServiceBooking, TripBooking, PricingRule } from "@/lib/types";
+import { Booking, CheckInOut, Payment, ServiceBooking, TripBooking, PricingRule, Refund } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +26,17 @@ import {
   Globe,
   Printer,
   Sparkles,
+  AlertTriangle,
+  RotateCcw,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 export default function AdminBookingDetailPage() {
   const params = useParams();
@@ -39,7 +49,12 @@ export default function AdminBookingDetailPage() {
   const [services, setServices] = useState<ServiceBooking[]>([]);
   const [trips, setTrips] = useState<TripBooking[]>([]);
   const [pricingRules, setPricingRules] = useState<PricingRule[]>([]);
+  const [refunds, setRefunds] = useState<Refund[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [isCancelOpen, setIsCancelOpen] = useState<boolean>(false);
+  const [cancelReason, setCancelReason] = useState<string>("");
+  const [isCancelling, setIsCancelling] = useState<boolean>(false);
+  const [cancelResult, setCancelResult] = useState<any>(null);
 
   useEffect(() => {
     async function fetchAllBookingDetails() {
@@ -47,13 +62,14 @@ export default function AdminBookingDetailPage() {
       setLoading(true);
       try {
         const idNum = Number(bookingId);
-        const [bRes, cioRes, pRes, sbRes, tbRes, prRes] = await Promise.all([
+        const [bRes, cioRes, pRes, sbRes, tbRes, prRes, rfRes] = await Promise.all([
           supabase.from("booking").select("*, customer(*)").eq("booking_id", idNum).single(),
           supabase.from("check_in_out").select("*, room(*, room_type(*))").eq("booking_booking_id", idNum).maybeSingle(),
           supabase.from("payment").select("*").eq("booking_booking_id", idNum),
           supabase.from("service_booking").select("*, service(*)").eq("booking_booking_id", idNum),
           supabase.from("trip_booking").select("*, trip(*, tour(*))").eq("booking_booking_id", idNum),
           supabase.from("pricing_rule").select("*"),
+          supabase.from("refund").select("*").eq("booking_booking_id", idNum).order("refund_date", { ascending: false }),
         ]);
 
         if (bRes.data) setBooking(bRes.data);
@@ -62,6 +78,7 @@ export default function AdminBookingDetailPage() {
         if (sbRes.data) setServices(sbRes.data);
         if (tbRes.data) setTrips(tbRes.data);
         if (prRes.data) setPricingRules(prRes.data);
+        if (rfRes.data) setRefunds(rfRes.data);
       } catch (err) {
         console.error("Error loading admin booking detail:", err);
       } finally {
@@ -78,10 +95,54 @@ export default function AdminBookingDetailPage() {
         return <Badge className="bg-emerald-500 text-white gap-1"><CheckCircle className="h-3.5 w-3.5" /> Confirmed</Badge>;
       case "Pending":
         return <Badge className="bg-amber-500 text-white gap-1"><Clock className="h-3.5 w-3.5" /> Pending</Badge>;
+      case "Checked In":
+        return <Badge className="bg-blue-600 text-white gap-1"><CheckCircle className="h-3.5 w-3.5" /> Checked In</Badge>;
+      case "Checked Out":
+        return <Badge className="bg-slate-500 text-white gap-1"><CheckCircle className="h-3.5 w-3.5" /> Checked Out</Badge>;
+      case "No Show":
+        return <Badge className="bg-purple-600 text-white gap-1"><XCircle className="h-3.5 w-3.5" /> No Show</Badge>;
       case "Cancelled":
         return <Badge className="bg-red-500 text-white gap-1"><XCircle className="h-3.5 w-3.5" /> Cancelled</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
+    }
+  };
+
+  const handleAdminCancel = async () => {
+    if (!booking) return;
+    setIsCancelling(true);
+    try {
+      const res = await fetch("/api/cancel-booking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookingId: booking.booking_id,
+          reason: cancelReason || "Cancelled by admin",
+          userEmail: "admin@hbaoms.com",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to cancel");
+      setCancelResult(data);
+      // Refresh booking data
+      const { data: refreshed } = await supabase
+        .from("booking")
+        .select("*, customer(*)")
+        .eq("booking_id", booking.booking_id)
+        .single();
+      if (refreshed) setBooking(refreshed);
+      // Refresh refunds
+      const { data: rfData } = await supabase
+        .from("refund")
+        .select("*")
+        .eq("booking_booking_id", booking.booking_id)
+        .order("refund_date", { ascending: false });
+      if (rfData) setRefunds(rfData);
+    } catch (err: any) {
+      console.error("Admin cancellation error:", err);
+      setCancelResult({ error: err.message });
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -155,6 +216,15 @@ export default function AdminBookingDetailPage() {
           <Button variant="outline" onClick={() => window.print()} className="gap-2">
             <Printer className="h-4 w-4" /> Print Dossier
           </Button>
+          {booking.booking_status !== "Cancelled" && booking.booking_status !== "Checked Out" && (
+            <Button
+              variant="destructive"
+              className="gap-2"
+              onClick={() => { setCancelReason(""); setCancelResult(null); setIsCancelOpen(true); }}
+            >
+              <XCircle className="h-4 w-4" /> Cancel Booking
+            </Button>
+          )}
         </div>
       </div>
 
@@ -379,8 +449,108 @@ export default function AdminBookingDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Refund Logs */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4">
+            <h3 className="font-bold text-base text-navy-900 flex items-center gap-2 border-b border-slate-100 pb-3">
+              <RotateCcw className="h-5 w-5 text-red-500" /> Refund History
+            </h3>
+            {refunds.length === 0 ? (
+              <p className="text-xs text-slate-400">No refunds have been processed for this booking.</p>
+            ) : (
+              <div className="space-y-2">
+                {refunds.map((r) => (
+                  <div key={r.refund_id} className="p-3 bg-red-50 rounded-lg text-xs space-y-1 border border-red-100">
+                    <div className="flex justify-between font-bold text-navy-900">
+                      <span>Refund #{r.refund_id}</span>
+                      <span className="text-red-600">-{formatCurrency(r.refund_amount)}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 flex justify-between">
+                      <span>Date: {formatDate(r.refund_date)}</span>
+                      <span>Payment Ref: #{r.payment_payment_id}</span>
+                    </div>
+                    {r.refund_reason && (
+                      <div className="text-[11px] text-slate-500">Reason: {r.refund_reason}</div>
+                    )}
+                    {r.stripe_refund_id && (
+                      <div className="text-[10px] text-slate-400 font-mono truncate">Stripe: {r.stripe_refund_id}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Admin Cancellation Modal */}
+      <Dialog open={isCancelOpen} onOpenChange={setIsCancelOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" /> Cancel Booking #{booking.booking_id}
+            </DialogTitle>
+          </DialogHeader>
+
+          {cancelResult?.success ? (
+            <div className="space-y-3 py-2">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-800 space-y-1">
+                <p className="font-bold">Booking cancelled successfully.</p>
+                <p>Days before check-in: {cancelResult.daysBeforeCheckIn}</p>
+                <p>Cancellation fee: {cancelResult.feePercent}% ({formatCurrency(cancelResult.feeAmount)})</p>
+                <p>Refund issued: {formatCurrency(cancelResult.refundAmount)}</p>
+                <p className="text-[11px] text-emerald-600">{cancelResult.explanation}</p>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsCancelOpen(false)}>Close</Button>
+              </DialogFooter>
+            </div>
+          ) : cancelResult?.error ? (
+            <div className="space-y-3 py-2">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800">
+                <p className="font-bold">Cancellation failed</p>
+                <p>{cancelResult.error}</p>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsCancelOpen(false)}>Close</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-slate-600">
+                This will cancel the booking and process applicable refunds based on the tier policy.
+                Service and excursion add-ons will also be cancelled.
+              </p>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+                <p className="font-semibold flex items-center gap-1">
+                  <AlertTriangle className="h-3.5 w-3.5" /> Cancellation fee tiers:
+                </p>
+                <ul className="mt-1 space-y-0.5 list-disc pl-4">
+                  <li>7+ days before check-in: 0% fee (full refund)</li>
+                  <li>3-6 days before check-in: 50% fee</li>
+                  <li>2 days or less: 100% fee (no refund)</li>
+                </ul>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-700">Cancellation Reason (optional)</label>
+                <Textarea
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  placeholder="Reason for cancellation..."
+                  rows={3}
+                  className="text-sm"
+                />
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsCancelOpen(false)}>Go Back</Button>
+                <Button variant="destructive" onClick={handleAdminCancel} disabled={isCancelling}>
+                  {isCancelling ? "Processing..." : "Confirm Cancellation"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

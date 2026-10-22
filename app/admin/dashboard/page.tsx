@@ -6,6 +6,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
+import { nowInstant, instantToMauritiusParts } from "@/lib/time";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Hotel,
@@ -116,7 +117,8 @@ export default function AdminDashboardPage() {
       });
 
       // 2. Revenue Over Time (Current year payments grouped by month using idx_payment_date)
-      const currentYearStart = `${new Date().getFullYear()}-01-01`;
+      const currentYear = instantToMauritiusParts(nowInstant()).year;
+      const currentYearStart = `${currentYear}-01-01`;
       const { data: payments } = await supabase
         .from("payment")
         .select("payment_amount, payment_date")
@@ -129,9 +131,9 @@ export default function AdminDashboardPage() {
 
       if (payments && payments.length > 0) {
         payments.forEach((p) => {
-          const d = new Date(p.payment_date);
-          if (!isNaN(d.getTime())) {
-            const monthName = monthsOrder[d.getMonth()];
+          const parts = instantToMauritiusParts(p.payment_date);
+          const monthName = monthsOrder[parts.month - 1];
+          if (monthName) {
             monthlyMap[monthName] = (monthlyMap[monthName] || 0) + Number(p.payment_amount || 0);
           }
         });
@@ -200,9 +202,9 @@ export default function AdminDashboardPage() {
       const dayCounts: Record<string, number> = { Sun: 0, Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0 };
       if (datesData) {
         datesData.forEach((d) => {
-          const dateObj = new Date(d.check_in_date);
-          if (!isNaN(dateObj.getTime())) {
-            const dayName = days[dateObj.getDay()];
+          const parts = instantToMauritiusParts(d.check_in_date);
+          const dayName = days[parts.dayOfWeek];
+          if (dayName) {
             dayCounts[dayName]++;
           }
         });

@@ -84,7 +84,13 @@ export default function RoomTypesPage() {
     setIsDeleteOpen(true);
   };
 
-  const handleSubmitModal = async (values: { type: string; price: number; size: number }) => {
+  const handleSubmitModal = async (values: {
+    type: string;
+    price: number;
+    size: number;
+    max_adults: number;
+    max_children: number;
+  }) => {
     setIsLoading(true);
     const now = new Date().toISOString();
     const trimmedType = values.type.trim();
@@ -112,6 +118,8 @@ export default function RoomTypesPage() {
             type: trimmedType,
             price: values.price,
             size: values.size,
+            max_adults: values.max_adults,
+            max_children: values.max_children,
             updated_by_: currentUserEmail,
             date_updated: now,
           })
@@ -139,6 +147,8 @@ export default function RoomTypesPage() {
             type: trimmedType,
             price: values.price,
             size: values.size,
+            max_adults: values.max_adults,
+            max_children: values.max_children,
             created_by: currentUserEmail,
             date_created: now,
           },
@@ -196,6 +206,14 @@ export default function RoomTypesPage() {
     {
       header: "Size (m²)",
       cell: (row) => <span>{row.size} m²</span>,
+    },
+    {
+      header: "Capacity",
+      cell: (row) => (
+        <span className="text-xs font-medium text-slate-700">
+          Max {row.max_adults || 2} Adults, {row.max_children ?? 2} Children
+        </span>
+      ),
     },
     {
       header: "Date Created",

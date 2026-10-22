@@ -5,6 +5,7 @@ import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { Room, RoomType, PricingRule } from "@/lib/types";
+import { mauritiusToday } from "@/lib/time";
 import { RoomCard } from "@/components/customer/RoomCard";
 import { SkeletonCard } from "@/components/shared/SkeletonCard";
 import { Input } from "@/components/ui/input";
@@ -59,7 +60,7 @@ export default function CustomerRoomsPage() {
   };
 
   const getRuleForRoom = (room: Room) => {
-    const today = new Date().toISOString().split("T")[0];
+    const today = mauritiusToday();
     const rule = pricingRules.find(
       (p) =>
         p.room_type_room_type_id === room.room_type_room_type_id &&

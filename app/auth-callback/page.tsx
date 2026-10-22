@@ -5,6 +5,7 @@ import React, { useEffect } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { nowInstant } from "@/lib/time";
 
 export default function AuthCallbackPage() {
   const { isLoaded: isAuthLoaded, isSignedIn } = useAuth();
@@ -63,7 +64,7 @@ export default function AuthCallbackPage() {
               nationality: "Mauritian",
               country: "Mauritius",
               created_by: "Clerk AutoSync",
-              date_created: new Date().toISOString(),
+              date_created: nowInstant(),
             },
           ]);
         }

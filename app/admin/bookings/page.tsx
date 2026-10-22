@@ -6,6 +6,7 @@ import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
 import { Booking, Customer } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
+import { nowInstant, mauritiusToday, startOfMauritiusDay } from "@/lib/time";
 import { SkeletonTable } from "@/components/shared/SkeletonTable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,7 +45,7 @@ export default function BookingsPage() {
   // Form State
   const [customerId, setCustomerId] = useState<string>("");
   const [bookingDate, setBookingDate] = useState<string>("");
-  const [bookingStatus, setBookingStatus] = useState<"Pending" | "Confirmed" | "Cancelled">("Pending");
+  const [bookingStatus, setBookingStatus] = useState<"Pending" | "Confirmed" | "Checked In" | "Checked Out" | "Cancelled" | "No Show">("Pending");
   const [bookingType, setBookingType] = useState<"RO" | "HB" | "FB">("RO");
   const [formError, setFormError] = useState<string>("");
 
@@ -72,7 +73,7 @@ export default function BookingsPage() {
   const handleOpenAdd = () => {
     setSelectedBooking(null);
     setCustomerId(customers.length > 0 ? String(customers[0].cust_id) : "");
-    setBookingDate(new Date().toISOString().split("T")[0]);
+    setBookingDate(mauritiusToday());
     setBookingStatus("Pending");
     setBookingType("RO");
     setFormError("");
@@ -108,17 +109,16 @@ export default function BookingsPage() {
     }
 
     // Application validation: date cannot be in the past for new booking
-    const selectedD = new Date(bookingDate);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (selectedD < today && !selectedBooking) {
+    const todayStr = mauritiusToday();
+    if (bookingDate < todayStr && !selectedBooking) {
       setFormError("Booking date cannot be in the past.");
       return;
     }
 
     setIsSaving(true);
     const currentUserEmail = user?.primaryEmailAddress?.emailAddress || "admin@hbaoms.com";
-    const now = new Date().toISOString();
+    const now = nowInstant();
+    const bookingDateInstant = bookingDate.includes("T") ? bookingDate : startOfMauritiusDay(bookingDate);
 
     try {
       if (selectedBooking) {
@@ -127,7 +127,7 @@ export default function BookingsPage() {
           .from("booking")
           .update({
             customer_cust_id: Number(customerId),
-            booking_date: bookingDate,
+            booking_date: bookingDateInstant,
             booking_status: bookingStatus,
             booking_type: bookingType,
             updated_by_: currentUserEmail,
@@ -141,7 +141,7 @@ export default function BookingsPage() {
         const { error } = await supabase.from("booking").insert([
           {
             customer_cust_id: Number(customerId),
-            booking_date: bookingDate,
+            booking_date: bookingDateInstant,
             booking_status: bookingStatus,
             booking_type: bookingType,
             created_by: currentUserEmail,
@@ -191,6 +191,12 @@ export default function BookingsPage() {
         return <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white gap-1"><CheckCircle className="h-3 w-3" /> Confirmed</Badge>;
       case "Pending":
         return <Badge className="bg-amber-500 hover:bg-amber-600 text-white gap-1"><Clock className="h-3 w-3" /> Pending</Badge>;
+      case "Checked In":
+        return <Badge className="bg-blue-600 hover:bg-blue-700 text-white gap-1"><CheckCircle className="h-3 w-3" /> Checked In</Badge>;
+      case "Checked Out":
+        return <Badge className="bg-slate-500 hover:bg-slate-600 text-white gap-1"><CheckCircle className="h-3 w-3" /> Checked Out</Badge>;
+      case "No Show":
+        return <Badge className="bg-purple-600 hover:bg-purple-700 text-white gap-1"><XCircle className="h-3 w-3" /> No Show</Badge>;
       case "Cancelled":
         return <Badge className="bg-red-500 hover:bg-red-600 text-white gap-1"><XCircle className="h-3 w-3" /> Cancelled</Badge>;
       default:
@@ -365,6 +371,9 @@ export default function BookingsPage() {
                   <SelectContent>
                     <SelectItem value="Pending">Pending</SelectItem>
                     <SelectItem value="Confirmed">Confirmed</SelectItem>
+                    <SelectItem value="Checked In">Checked In</SelectItem>
+                    <SelectItem value="Checked Out">Checked Out</SelectItem>
+                    <SelectItem value="No Show">No Show</SelectItem>
                     <SelectItem value="Cancelled">Cancelled</SelectItem>
                   </SelectContent>
                 </Select>
