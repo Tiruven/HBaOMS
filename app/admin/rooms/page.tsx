@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { DataTable, Column } from "@/components/shared/DataTable";
 import { DeleteDialog } from "@/components/shared/DeleteDialog";
 import { RoomModal } from "@/components/modals/RoomModal";
@@ -8,7 +9,7 @@ import { Room, RoomType, Feature } from "@/lib/types";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2, Sparkles } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -326,6 +327,14 @@ export default function RoomsPage() {
         searchPlaceholder="Filter rooms..."
         onAddNew={handleOpenAdd}
         addNewLabel="Add Room"
+        extraAction={
+          <Button asChild variant="outline" className="gap-2">
+            <Link href="/admin/features">
+              <Sparkles className="h-4 w-4 text-gold-500" />
+              Room Features
+            </Link>
+          </Button>
+        }
       />
 
       <RoomModal

@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { Room, Feature } from "@/lib/types";
 import { SkeletonTable } from "@/components/shared/SkeletonTable";
@@ -168,12 +169,19 @@ export default function RoomFeaturesPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold text-navy-900">Room Feature Junction</h1>
+          <h1 className="text-2xl font-bold text-navy-900">Room Amenities Junction</h1>
           <p className="text-slate-500 text-sm">Link amenities and room features directly to physical rooms.</p>
         </div>
-        <Button onClick={handleOpenAdd} variant="gold" className="gap-2">
-          <Plus className="h-4 w-4" /> Manage Room Amenities
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline" className="gap-2">
+            <Link href="/admin/features">
+              <Sparkles className="h-4 w-4 text-gold-500" /> Features Catalog
+            </Link>
+          </Button>
+          <Button onClick={handleOpenAdd} variant="gold" className="gap-2">
+            <Plus className="h-4 w-4" /> Manage Room Amenities
+          </Button>
+        </div>
       </div>
 
       <div className="relative max-w-md">

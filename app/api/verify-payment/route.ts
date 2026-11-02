@@ -170,6 +170,13 @@ export async function POST(req: Request) {
         .single();
 
       if (pErr || !newPay) {
+        if (pErr?.code === "23505") {
+          return NextResponse.json({
+            success: true,
+            bookingId,
+            alreadyProcessed: true,
+          });
+        }
         console.error("Add-on payment insertion error:", pErr);
         return NextResponse.json({ error: "Failed to create payment receipt" }, { status: 500 });
       }

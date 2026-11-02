@@ -60,6 +60,8 @@ const navGroups: NavGroup[] = [
     items: [
       { title: "Room Types", href: "/admin/room-types", icon: Hotel },
       { title: "Rooms", href: "/admin/rooms", icon: BedDouble },
+      { title: "Room Features", href: "/admin/features", icon: Sparkles },
+      { title: "Room Amenities", href: "/admin/room-features", icon: Layers },
     ],
   },
   {

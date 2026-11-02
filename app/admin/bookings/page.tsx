@@ -136,6 +136,33 @@ export default function BookingsPage() {
           .eq("booking_id", selectedBooking.booking_id);
 
         if (error) throw error;
+
+        // Cascade cancellation if marked Cancelled
+        if (bookingStatus === "Cancelled" && selectedBooking.booking_status !== "Cancelled") {
+          await supabase
+            .from("service_booking")
+            .update({
+              sb_status: "Cancelled",
+              cancelled_at: now,
+              cancellation_reason: "Admin marked reservation Cancelled",
+              updated_by_: currentUserEmail,
+              date_updated: now,
+            })
+            .eq("booking_booking_id", selectedBooking.booking_id)
+            .neq("sb_status", "Cancelled");
+
+          await supabase
+            .from("trip_booking")
+            .update({
+              tb_status: "Cancelled",
+              cancelled_at: now,
+              cancellation_reason: "Admin marked reservation Cancelled",
+              updated_by_: currentUserEmail,
+              date_updated: now,
+            })
+            .eq("booking_booking_id", selectedBooking.booking_id)
+            .neq("tb_status", "Cancelled");
+        }
       } else {
         // CREATE
         const { error } = await supabase.from("booking").insert([

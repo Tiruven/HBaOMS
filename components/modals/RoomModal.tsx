@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect } from "react";
+import Link from "next/link";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -23,7 +24,7 @@ import {
 } from "@/components/ui/select";
 import { Room, RoomType, Feature } from "@/lib/types";
 import { AuditFieldsView } from "@/components/shared/AuditFields";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle, Sparkles } from "lucide-react";
 
 const roomSchema = z.object({
   room_desc: z.string().trim().min(1, "Room description/number is required").max(500, "Max 500 characters"),
@@ -204,7 +205,16 @@ export const RoomModal: React.FC<RoomModalProps> = ({
 
           {/* Features Checklist */}
           <div className="space-y-2">
-            <Label>Room Features</Label>
+            <div className="flex items-center justify-between">
+              <Label>Room Features</Label>
+              <Link
+                href="/admin/features"
+                target="_blank"
+                className="text-xs text-gold-600 hover:text-gold-700 hover:underline flex items-center gap-1 font-medium"
+              >
+                <Sparkles className="h-3 w-3" /> Manage Catalog
+              </Link>
+            </div>
             <Controller
               name="feature_ids"
               control={control}
@@ -219,7 +229,16 @@ export const RoomModal: React.FC<RoomModalProps> = ({
 
                 if (features.length === 0) {
                   return (
-                    <p className="text-xs text-slate-400 italic">No features available. Add some in features page.</p>
+                    <div className="p-3 border border-dashed border-slate-200 rounded-lg text-center bg-slate-50/50">
+                      <p className="text-xs text-slate-500 italic">No features created yet.</p>
+                      <Link
+                        href="/admin/features"
+                        target="_blank"
+                        className="text-xs text-gold-600 hover:underline font-semibold mt-1 inline-block"
+                      >
+                        Create features in Features page &rarr;
+                      </Link>
+                    </div>
                   );
                 }
 

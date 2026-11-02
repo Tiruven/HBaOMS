@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Feature } from "@/lib/types";
 import { AuditFieldsView } from "@/components/shared/AuditFields";
-import { Loader2 } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
 
 const featureSchema = z.object({
   room_features: z.string().min(1, "Feature name is required").max(100, "Max 100 characters"),
@@ -28,7 +28,7 @@ type FeatureFormValues = z.infer<typeof featureSchema>;
 interface FeatureModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (values: FeatureFormValues) => Promise<void>;
+  onSubmit: (values: FeatureFormValues) => Promise<{ success: boolean; error?: string } | void>;
   initialData?: Feature | null;
   isLoading?: boolean;
 }
@@ -40,6 +40,8 @@ export const FeatureModal: React.FC<FeatureModalProps> = ({
   initialData,
   isLoading = false,
 }) => {
+  const [serverError, setServerError] = useState<string>("");
+
   const {
     register,
     handleSubmit,
@@ -54,6 +56,7 @@ export const FeatureModal: React.FC<FeatureModalProps> = ({
   });
 
   useEffect(() => {
+    setServerError("");
     if (initialData) {
       reset({
         room_features: initialData.room_features,
@@ -68,7 +71,12 @@ export const FeatureModal: React.FC<FeatureModalProps> = ({
   }, [initialData, reset, isOpen]);
 
   const handleFormSubmit = async (data: FeatureFormValues) => {
-    await onSubmit(data);
+    setServerError("");
+    const result = await onSubmit(data);
+    if (result && !result.success) {
+      setServerError(result.error || "Failed to save feature.");
+      return;
+    }
     onClose();
   };
 
@@ -80,6 +88,13 @@ export const FeatureModal: React.FC<FeatureModalProps> = ({
             {initialData ? "Edit Room Feature" : "Add New Room Feature"}
           </DialogTitle>
         </DialogHeader>
+
+        {serverError && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-md flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+            <span>{serverError}</span>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4 py-2">
           <div className="space-y-2">

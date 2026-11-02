@@ -181,18 +181,38 @@ export default function CheckInOutPage() {
       const formattedIn = checkInDate.includes("T") ? checkInDate : mauritiusToInstant(checkInDate, "14:00:00");
       const formattedOut = checkOutDate.includes("T") ? checkOutDate : mauritiusToInstant(checkOutDate, DEFAULT_CHECKOUT_CUTOFF + ":00");
 
-      const { error: insertError } = await supabase.from("check_in_out").insert([
+      let { error: insertError } = await supabase.from("check_in_out").insert([
         {
           room_room_id: Number(roomId),
           booking_booking_id: Number(bookingId),
           check_in_date: formattedIn,
           check_out_date: formattedOut,
+          status: "Scheduled",
           created_by: currentUserEmail,
           date_created: now,
           updated_by_: currentUserEmail,
           date_updated: now,
         },
       ]);
+
+      // Fallback if schema cache lacks created_by / audit columns
+      if (
+        insertError &&
+        (insertError.message?.includes("created_by") ||
+          insertError.message?.includes("schema cache") ||
+          insertError.message?.includes("column") ||
+          insertError.code === "PGRST204")
+      ) {
+        const retryRes = await supabase.from("check_in_out").insert([
+          {
+            room_room_id: Number(roomId),
+            booking_booking_id: Number(bookingId),
+            check_in_date: formattedIn,
+            check_out_date: formattedOut,
+          },
+        ]);
+        insertError = retryRes.error;
+      }
 
       if (insertError) throw insertError;
 
@@ -238,7 +258,18 @@ export default function CheckInOutPage() {
         .eq("room_room_id", stay.room_room_id)
         .eq("booking_booking_id", stay.booking_booking_id);
 
-      if (error) throw error;
+      if (error) {
+        if (error.message?.includes("actual_check_in")) {
+          const { error: fallbackErr } = await supabase
+            .from("check_in_out")
+            .update({ status: "Checked In" })
+            .eq("room_room_id", stay.room_room_id)
+            .eq("booking_booking_id", stay.booking_booking_id);
+          if (fallbackErr) throw fallbackErr;
+        } else {
+          throw error;
+        }
+      }
       await fetchData();
     } catch (err: any) {
       console.error("Check in error:", err);
@@ -258,7 +289,18 @@ export default function CheckInOutPage() {
         .eq("room_room_id", stay.room_room_id)
         .eq("booking_booking_id", stay.booking_booking_id);
 
-      if (error) throw error;
+      if (error) {
+        if (error.message?.includes("actual_check_out")) {
+          const { error: fallbackErr } = await supabase
+            .from("check_in_out")
+            .update({ status: "Checked Out" })
+            .eq("room_room_id", stay.room_room_id)
+            .eq("booking_booking_id", stay.booking_booking_id);
+          if (fallbackErr) throw fallbackErr;
+        } else {
+          throw error;
+        }
+      }
       await fetchData();
     } catch (err: any) {
       console.error("Check out error:", err);

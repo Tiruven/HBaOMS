@@ -27,6 +27,7 @@ interface DataTableProps<T> {
   searchPlaceholder?: string;
   onAddNew: () => void;
   addNewLabel?: string;
+  extraAction?: React.ReactNode;
   title: string;
   description?: string;
 }
@@ -38,6 +39,7 @@ export function DataTable<T extends Record<string, any>>({
   searchPlaceholder = "Search records...",
   onAddNew,
   addNewLabel = "Add New",
+  extraAction,
   title,
   description,
 }: DataTableProps<T>) {
@@ -61,10 +63,13 @@ export function DataTable<T extends Record<string, any>>({
             <p className="text-sm text-slate-500 mt-1">{description}</p>
           )}
         </div>
-        <Button onClick={onAddNew} variant="gold" className="gap-2">
-          <Plus className="h-4 w-4" />
-          {addNewLabel}
-        </Button>
+        <div className="flex items-center gap-2">
+          {extraAction}
+          <Button onClick={onAddNew} variant="gold" className="gap-2">
+            <Plus className="h-4 w-4" />
+            {addNewLabel}
+          </Button>
+        </div>
       </div>
 
       {/* Search Bar */}

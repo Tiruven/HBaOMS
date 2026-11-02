@@ -26,6 +26,7 @@ import {
   mauritiusToday,
   instantToMauritiusParts,
   DEFAULT_CHECKOUT_CUTOFF,
+  endOfMauritiusDay,
 } from "@/lib/time";
 
 export async function runAutoCheckout(): Promise<AutoCheckoutResult> {
@@ -33,12 +34,13 @@ export async function runAutoCheckout(): Promise<AutoCheckoutResult> {
     const todayStr = mauritiusToday();
     const nowIso = nowInstant();
     const nowParts = instantToMauritiusParts(nowIso);
+    const endOfTodayIso = endOfMauritiusDay(todayStr);
 
-    // Query stays scheduled up to today in Mauritius time
+    // Query stays scheduled up to the end of today in Mauritius time
     const { data: overdueStays, error: fetchError } = await supabase
       .from("check_in_out")
       .select("*, booking(*, customer(*))")
-      .lte("check_out_date", todayStr);
+      .lte("check_out_date", endOfTodayIso);
 
     if (fetchError) {
       console.error("[Auto-Checkout] Error querying overdue stays:", fetchError);
@@ -79,7 +81,8 @@ export async function runAutoCheckout(): Promise<AutoCheckoutResult> {
       const wasCheckedIn = Boolean(stay.actual_check_in || stay.status === "Checked In");
 
       // 1. Update check_in_out record with Auto Checked Out status
-      const { error: updateError } = await supabase
+      let updateError: any = null;
+      const { error: fullUpdateErr } = await supabase
         .from("check_in_out")
         .update({
           status: "Auto Checked Out",
@@ -89,6 +92,24 @@ export async function runAutoCheckout(): Promise<AutoCheckoutResult> {
         })
         .eq("room_room_id", stay.room_room_id)
         .eq("booking_booking_id", stay.booking_booking_id);
+
+      if (fullUpdateErr) {
+        // Fallback if actual_check_out column is not yet present in schema cache
+        if (fullUpdateErr.message?.includes("actual_check_out")) {
+          const { error: fallbackErr } = await supabase
+            .from("check_in_out")
+            .update({
+              status: "Auto Checked Out",
+              updated_by_: "SYSTEM_AUTO_CHECKOUT",
+              date_updated: nowIso,
+            })
+            .eq("room_room_id", stay.room_room_id)
+            .eq("booking_booking_id", stay.booking_booking_id);
+          updateError = fallbackErr;
+        } else {
+          updateError = fullUpdateErr;
+        }
+      }
 
       if (updateError) {
         console.error(`[Auto-Checkout] Error updating stay for Room #${stay.room_room_id}, Booking #${stay.booking_booking_id}:`, updateError);

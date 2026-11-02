@@ -1,13 +1,14 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { DataTable, Column } from "@/components/shared/DataTable";
 import { DeleteDialog } from "@/components/shared/DeleteDialog";
 import { FeatureModal } from "@/components/modals/FeatureModal";
 import { Feature } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2, Layers } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -84,41 +85,93 @@ export default function FeaturesPage() {
   const handleSubmitModal = async (values: { room_features: string; feature_desc?: string | null }) => {
     setIsLoading(true);
     const now = new Date().toISOString();
+    const trimmedTitle = values.room_features.trim();
+
+    // Duplicate check
+    const isDuplicate = features.some(
+      (f) =>
+        (!selectedFeature || f.feature_id !== selectedFeature.feature_id) &&
+        f.room_features?.trim().toLowerCase() === trimmedTitle.toLowerCase()
+    );
+
+    if (isDuplicate) {
+      setIsLoading(false);
+      return {
+        success: false,
+        error: `A feature named "${trimmedTitle}" already exists in the catalog.`,
+      };
+    }
 
     if (selectedFeature) {
       // Update
       try {
-        await supabase
+        let { error } = await supabase
           .from("feature")
           .update({
-            room_features: values.room_features,
-            feature_desc: values.feature_desc,
+            room_features: trimmedTitle,
+            feature_desc: values.feature_desc?.trim() || null,
             updated_by_: currentUserEmail,
             date_updated: now,
           })
           .eq("feature_id", selectedFeature.feature_id);
-      } catch (err) {
-        console.error("Update feature error:", err);
+
+        if (error && (error.message?.includes("updated_by_") || error.message?.includes("schema cache"))) {
+          const retry = await supabase
+            .from("feature")
+            .update({
+              room_features: trimmedTitle,
+              feature_desc: values.feature_desc?.trim() || null,
+            })
+            .eq("feature_id", selectedFeature.feature_id);
+          error = retry.error;
+        }
+
+        if (error) {
+          setIsLoading(false);
+          return { success: false, error: error.message || "Failed to update feature." };
+        }
+      } catch (err: any) {
+        setIsLoading(false);
+        return { success: false, error: err.message || "Failed to update feature." };
       }
     } else {
       // Create
       try {
-        await supabase.from("feature").insert([
+        let { error } = await supabase.from("feature").insert([
           {
-            room_features: values.room_features,
-            feature_desc: values.feature_desc,
+            room_features: trimmedTitle,
+            feature_desc: values.feature_desc?.trim() || null,
             created_by: currentUserEmail,
             date_created: now,
           },
         ]);
-      } catch (err) {
-        console.error("Insert feature error:", err);
+
+        if (error && (error.message?.includes("created_by") || error.message?.includes("schema cache"))) {
+          const retry = await supabase.from("feature").insert([
+            {
+              room_features: trimmedTitle,
+              feature_desc: values.feature_desc?.trim() || null,
+            },
+          ]);
+          error = retry.error;
+        }
+
+        if (error) {
+          setIsLoading(false);
+          if (error.code === "23505") {
+            return { success: false, error: `A feature named "${trimmedTitle}" already exists in the database.` };
+          }
+          return { success: false, error: error.message || "Failed to create feature." };
+        }
+      } catch (err: any) {
+        setIsLoading(false);
+        return { success: false, error: err.message || "Failed to create feature." };
       }
     }
 
     await fetchFeatures();
     setIsLoading(false);
-    setIsModalOpen(false);
+    return { success: true };
   };
 
   const handleConfirmDelete = async () => {
@@ -200,6 +253,14 @@ export default function FeaturesPage() {
         searchPlaceholder="Filter features..."
         onAddNew={handleOpenAdd}
         addNewLabel="Add Feature"
+        extraAction={
+          <Button asChild variant="outline" className="gap-2">
+            <Link href="/admin/room-features">
+              <Layers className="h-4 w-4 text-navy-600" />
+              Assign to Rooms
+            </Link>
+          </Button>
+        }
       />
 
       <FeatureModal

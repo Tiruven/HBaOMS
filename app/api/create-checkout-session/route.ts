@@ -1,6 +1,8 @@
 // app/api/create-checkout-session/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { supabase } from "@/lib/supabaseClient";
+import { nowInstant, mauritiusToday } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
@@ -45,8 +47,75 @@ export async function POST(req: Request) {
       }
 
       if (isMock) {
+        // In mock mode, persist add-on records directly since there is
+        // no Stripe webhook or verify-payment call to create them.
+        const mockSessionId = `cs_test_mock_addon_${Date.now()}`;
+        const today = mauritiusToday();
+        const emailForAudit = guestEmail || "guest@hbaoms.com";
+
+        try {
+          // Insert a payment row for the add-on bundle
+          const { data: mockPay, error: mockPayErr } = await supabase
+            .from("payment")
+            .insert([
+              {
+                booking_booking_id: Number(bookingId),
+                payment_date: today,
+                payment_type: "Addon",
+                payment_method: "ON",
+                payment_amount: Number(totalAmount || 0),
+                stripe_session_id: mockSessionId,
+                created_by: emailForAudit,
+                date_created: new Date().toISOString(),
+              },
+            ])
+            .select("payment_id")
+            .single();
+
+          const paymentId = mockPay?.payment_id;
+
+          if (mockPayErr) {
+            console.error("Mock addon payment insert error:", mockPayErr);
+          }
+
+          // Insert service bookings
+          for (const s of (serviceBookings || [])) {
+            await supabase.from("service_booking").insert([
+              {
+                booking_booking_id: Number(bookingId),
+                service_service_id: Number(s.serviceId),
+                service_date: s.serviceDate,
+                time_in: s.timeIn,
+                time_out: s.timeOut,
+                num_person: Number(s.numPerson) || 1,
+                total_amount: Number(s.amount) || 0,
+                sb_status: "Pending",
+                payment_id: paymentId || null,
+                created_by: emailForAudit,
+                date_created: new Date().toISOString(),
+              },
+            ]);
+          }
+
+          // Insert trip bookings
+          for (const t of (tripBookings || [])) {
+            await supabase.from("trip_booking").insert([
+              {
+                trip_trip_id: Number(t.tripId),
+                booking_booking_id: Number(bookingId),
+                num_adult: Number(t.numAdult) || 0,
+                num_child: Number(t.numChild) || 0,
+                total_amount: Number(t.amount) || 0,
+                payment_id: paymentId || null,
+              },
+            ]);
+          }
+        } catch (mockErr) {
+          console.error("Mock addon DB insertion error:", mockErr);
+        }
+
         return NextResponse.json({
-          sessionId: `cs_test_mock_addon_${Date.now()}`,
+          sessionId: mockSessionId,
           url: `${origin}/customer/bookings/${bookingId}?addon_success=true`,
         });
       }

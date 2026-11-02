@@ -240,7 +240,16 @@ export default function TripsPage() {
         return;
       }
 
-      const { error: insErr } = await supabase.from("trip").insert(departuresToInsert);
+      let { error: insErr } = await supabase.from("trip").insert(departuresToInsert);
+      if (insErr && (insErr.message?.includes("trip_trip_status_check") || insErr.message?.includes("chk_trip_status") || insErr.message?.includes("trip_status"))) {
+        // Fallback to 'Scheduled' if DB check constraint still enforces legacy values
+        const legacyDepartures = departuresToInsert.map((d) => ({
+          ...d,
+          trip_status: "Scheduled",
+        }));
+        const retryRes = await supabase.from("trip").insert(legacyDepartures);
+        insErr = retryRes.error;
+      }
       if (insErr) throw insErr;
 
       setFeedbackMsg({
@@ -292,16 +301,33 @@ export default function TripsPage() {
 
     try {
       if (selectedTrip) {
-        const { error } = await supabase.from("trip").update(payload).eq("trip_id", selectedTrip.trip_id);
+        let { error } = await supabase.from("trip").update(payload).eq("trip_id", selectedTrip.trip_id);
+        if (error && (error.message?.includes("trip_trip_status_check") || error.message?.includes("chk_trip_status") || error.message?.includes("trip_status"))) {
+          const fallbackStatus = payload.trip_status === "Pending" ? "Scheduled" : payload.trip_status === "In Progress" ? "Ongoing" : payload.trip_status;
+          const retry = await supabase.from("trip").update({ ...payload, trip_status: fallbackStatus }).eq("trip_id", selectedTrip.trip_id);
+          error = retry.error;
+        }
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("trip").insert([
+        let { error } = await supabase.from("trip").insert([
           {
             ...payload,
             created_by: currentUserEmail,
             date_created: now,
           },
         ]);
+        if (error && (error.message?.includes("trip_trip_status_check") || error.message?.includes("chk_trip_status") || error.message?.includes("trip_status"))) {
+          const fallbackStatus = payload.trip_status === "Pending" ? "Scheduled" : payload.trip_status === "In Progress" ? "Ongoing" : payload.trip_status;
+          const retry = await supabase.from("trip").insert([
+            {
+              ...payload,
+              trip_status: fallbackStatus,
+              created_by: currentUserEmail,
+              date_created: now,
+            },
+          ]);
+          error = retry.error;
+        }
         if (error) throw error;
       }
 

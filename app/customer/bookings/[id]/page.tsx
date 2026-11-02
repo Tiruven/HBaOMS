@@ -34,6 +34,7 @@ import {
   Loader2,
   Calendar,
   Compass,
+  ConciergeBell,
 } from "lucide-react";
 
 export default function CustomerBookingDetailPage() {
@@ -70,7 +71,10 @@ export default function CustomerBookingDetailPage() {
   const [isCancellingAddon, setIsCancellingAddon] = useState<boolean>(false);
   const [addonCancelError, setAddonCancelError] = useState<string>("");
 
+  const sessionId = searchParams.get("session_id");
   const addonSuccess = searchParams.get("addon_success") === "true";
+  const [addonVerifying, setAddonVerifying] = useState<boolean>(false);
+  const [addonSuccessBanner, setAddonSuccessBanner] = useState<boolean>(addonSuccess);
 
   const fetchDetail = useCallback(async () => {
     if (!bookingId) return;
@@ -104,6 +108,25 @@ export default function CustomerBookingDetailPage() {
   useEffect(() => {
     fetchDetail();
   }, [fetchDetail]);
+
+  // Handle post-Stripe return for add-ons verification
+  useEffect(() => {
+    if (addonSuccess) {
+      setAddonSuccessBanner(true);
+    }
+    if (sessionId && sessionId.startsWith("cs_") && !sessionId.includes("mock")) {
+      setAddonVerifying(true);
+      fetch("/api/verify-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      })
+        .then((res) => res.json())
+        .then(() => fetchDetail())
+        .catch((e) => console.error("Verify payment error:", e))
+        .finally(() => setAddonVerifying(false));
+    }
+  }, [sessionId, addonSuccess, fetchDetail]);
 
   const handlePrint = () => {
     window.print();
@@ -313,10 +336,22 @@ export default function CustomerBookingDetailPage() {
         </div>
       </div>
 
-      {addonSuccess && (
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-2xl flex items-center gap-2 text-xs font-semibold">
-          <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
-          <span>Add-on services and excursions confirmed successfully! Your receipt has been updated below.</span>
+      {addonVerifying && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-2xl flex items-center gap-2 text-xs font-semibold">
+          <Loader2 className="h-4 w-4 animate-spin text-amber-600 shrink-0" />
+          <span>Verifying add-on payment and updating your reservation items...</span>
+        </div>
+      )}
+
+      {addonSuccessBanner && !addonVerifying && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-2xl flex items-center justify-between gap-2 text-xs font-semibold">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
+            <span>Add-on services and excursions confirmed successfully! Your receipt has been updated below.</span>
+          </div>
+          <button onClick={() => setAddonSuccessBanner(false)} className="text-emerald-700 hover:text-emerald-900 text-xs underline">
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -409,9 +444,19 @@ export default function CustomerBookingDetailPage() {
 
         {/* Itemized Invoice Table (Decision F.1: room line, each add-on as its own line with date/time, status, amount paid, and if cancelled refund details) */}
         <div className="space-y-3">
-          <h3 className="font-bold text-sm text-[#1A202C] uppercase tracking-wider flex items-center gap-2">
-            <FileText className="h-4 w-4 text-[#A37836]" /> Itemized Charges Breakdown
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-sm text-[#1A202C] uppercase tracking-wider flex items-center gap-2">
+              <FileText className="h-4 w-4 text-[#A37836]" /> Itemized Charges Breakdown
+            </h3>
+            {canAddServices && (
+              <Button asChild size="sm" variant="outline" className="text-xs gap-1.5 h-8 border-[#A37836] text-[#A37836] hover:bg-[#F4EFE6] print:hidden">
+                <Link href={`/customer/bookings/${booking.booking_id}/addons`}>
+                  <Sparkles className="h-3.5 w-3.5" /> Add More Services & Tours
+                </Link>
+              </Button>
+            )}
+          </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border border-slate-100 rounded-xl overflow-hidden">
               <thead className="bg-[#F4EFE6] text-[#8B6327] uppercase font-bold">
@@ -423,7 +468,14 @@ export default function CustomerBookingDetailPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {/* Room Line */}
+                {/* SUBSECTION 1: Primary Accommodation */}
+                <tr className="bg-slate-50/80 border-b border-slate-200">
+                  <td colSpan={4} className="px-3 py-2 font-bold text-slate-700 uppercase tracking-wider text-[11px]">
+                    <span className="flex items-center gap-2">
+                      <BedDouble className="h-3.5 w-3.5 text-[#A37836]" /> Primary Accommodation
+                    </span>
+                  </td>
+                </tr>
                 <tr>
                   <td className="p-3 font-semibold text-[#1A202C]">
                     <div>{stay?.room?.room_type?.type || "Room Stay"} ({nights} night{nights > 1 ? "s" : ""})</div>
@@ -450,127 +502,157 @@ export default function CustomerBookingDetailPage() {
                   </td>
                 </tr>
 
-                {/* Services Lines */}
-                {services.map((s) => {
-                  const linkedRefund = refunds.find((r) => r.service_booking_id === s.sb_id);
-                  const isCancelled = s.sb_status === "Cancelled";
+                {/* SUBSECTION 2: Add-on Services */}
+                <tr className="bg-amber-50/50 border-b border-amber-100">
+                  <td colSpan={4} className="px-3 py-2 font-bold text-[#8B6327] uppercase tracking-wider text-[11px]">
+                    <span className="flex items-center gap-2">
+                      <ConciergeBell className="h-3.5 w-3.5 text-[#A37836]" /> Add-on Hotel Services & Spa ({services.length})
+                    </span>
+                  </td>
+                </tr>
+                {services.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="p-3 text-slate-400 italic text-[11px]">
+                      No spa or hotel services booked yet.
+                    </td>
+                  </tr>
+                ) : (
+                  services.map((s) => {
+                    const linkedRefund = refunds.find((r) => r.service_booking_id === s.sb_id);
+                    const isCancelled = s.sb_status === "Cancelled" || booking.booking_status === "Cancelled";
 
-                  return (
-                    <tr key={s.sb_id} className={isCancelled ? "bg-red-50/40" : ""}>
-                      <td className="p-3 font-semibold text-[#1A202C]">
-                        <div>{s.service?.service_name || "Hotel Service"}</div>
-                        <div className="text-[10px] text-slate-400">
-                          {s.num_person} person(s) • Date: {formatDate(s.service_date)}
-                          {s.service?.service_type === "scheduled" && ` (${formatMauritius(s.time_in, "time")} - ${formatMauritius(s.time_out, "time")})`}
-                        </div>
-                        {linkedRefund && (
-                          <div className="text-[10px] text-red-600 font-bold mt-0.5">
-                            Refunded: {formatCurrency(linkedRefund.refund_amount)} ({linkedRefund.refund_percentage}%)
+                    return (
+                      <tr key={s.sb_id} className={isCancelled ? "bg-red-50/40" : ""}>
+                        <td className="p-3 font-semibold text-[#1A202C]">
+                          <div>{s.service?.service_name || "Hotel Service"}</div>
+                          <div className="text-[10px] text-slate-400">
+                            {s.num_person} person(s) • Date: {formatDate(s.service_date)}
+                            {s.service?.service_type === "scheduled" && ` (${formatMauritius(s.time_in, "time")} - ${formatMauritius(s.time_out, "time")})`}
                           </div>
-                        )}
-                      </td>
-                      <td className="p-3">
-                        <Badge
-                          className={`text-[10px] ${
-                            isCancelled ? "bg-red-100 text-red-700 border-red-200" : "bg-slate-100 text-slate-700"
-                          }`}
-                        >
-                          {s.sb_status}
-                        </Badge>
-                        {isCancelled && s.cancelled_at && (
-                          <div className="text-[9px] text-slate-400 mt-0.5">
-                            Cancelled {formatDate(s.cancelled_at)}
-                          </div>
-                        )}
-                      </td>
-                      <td className="p-3 text-right font-bold text-[#1A202C]">
-                        <span className={isCancelled ? "line-through text-slate-400" : ""}>
-                          {formatCurrency(s.total_amount)}
-                        </span>
-                      </td>
-                      <td className="p-3 text-center print:hidden">
-                        {!isCancelled && canCancel && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() =>
-                              handleOpenAddonCancel(
-                                "service",
-                                s.sb_id,
-                                s.service?.service_name || "Service",
-                                s.total_amount
-                              )
-                            }
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50 text-[11px] h-7 px-2"
+                          {linkedRefund && (
+                            <div className="text-[10px] text-red-600 font-bold mt-0.5">
+                              Refunded: {formatCurrency(linkedRefund.refund_amount)} ({linkedRefund.refund_percentage}%)
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <Badge
+                            className={`text-[10px] ${
+                              isCancelled ? "bg-red-100 text-red-700 border-red-200" : "bg-slate-100 text-slate-700"
+                            }`}
                           >
-                            Cancel
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                            {booking.booking_status === "Cancelled" ? "Cancelled" : s.sb_status}
+                          </Badge>
+                          {isCancelled && s.cancelled_at && (
+                            <div className="text-[9px] text-slate-400 mt-0.5">
+                              Cancelled {formatDate(s.cancelled_at)}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3 text-right font-bold text-[#1A202C]">
+                          <span className={isCancelled ? "line-through text-slate-400" : ""}>
+                            {formatCurrency(s.total_amount)}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center print:hidden">
+                          {!isCancelled && canCancel && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() =>
+                                handleOpenAddonCancel(
+                                  "service",
+                                  s.sb_id,
+                                  s.service?.service_name || "Service",
+                                  s.total_amount
+                                )
+                              }
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50 text-[11px] h-7 px-2"
+                            >
+                              Cancel
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
 
-                {/* Excursion Trips Lines */}
-                {trips.map((t, idx) => {
-                  const linkedRefund = refunds.find((r) => r.trip_trip_id === t.trip_trip_id);
-                  const isCancelled = t.tb_status === "Cancelled" || booking.booking_status === "Cancelled";
+                {/* SUBSECTION 3: Add-on Excursions */}
+                <tr className="bg-amber-50/50 border-b border-amber-100">
+                  <td colSpan={4} className="px-3 py-2 font-bold text-[#8B6327] uppercase tracking-wider text-[11px]">
+                    <span className="flex items-center gap-2">
+                      <Compass className="h-3.5 w-3.5 text-[#A37836]" /> Add-on Excursions & Guided Tours ({trips.length})
+                    </span>
+                  </td>
+                </tr>
+                {trips.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="p-3 text-slate-400 italic text-[11px]">
+                      No excursion departures booked yet.
+                    </td>
+                  </tr>
+                ) : (
+                  trips.map((t, idx) => {
+                    const linkedRefund = refunds.find((r) => r.trip_trip_id === t.trip_trip_id);
+                    const isCancelled = t.tb_status === "Cancelled" || booking.booking_status === "Cancelled";
 
-                  return (
-                    <tr key={`${t.trip_trip_id}-${idx}`} className={isCancelled ? "bg-red-50/40" : ""}>
-                      <td className="p-3 font-semibold text-[#1A202C]">
-                        <div>{t.trip?.tour?.tour_name || "Island Excursion"}</div>
-                        <div className="text-[10px] text-slate-400">
-                          {t.num_adult} Adult(s), {t.num_child} Child(ren) (under 12) • Departure: {formatDate(t.trip?.trip_date)}
-                          {t.trip?.start_time && ` (${formatMauritius(t.trip.start_time, "time")})`}
-                        </div>
-                        {linkedRefund && (
-                          <div className="text-[10px] text-red-600 font-bold mt-0.5">
-                            Refunded: {formatCurrency(linkedRefund.refund_amount)} ({linkedRefund.refund_percentage}%)
+                    return (
+                      <tr key={`${t.trip_trip_id}-${idx}`} className={isCancelled ? "bg-red-50/40" : ""}>
+                        <td className="p-3 font-semibold text-[#1A202C]">
+                          <div>{t.trip?.tour?.tour_name || "Island Excursion"}</div>
+                          <div className="text-[10px] text-slate-400">
+                            {t.num_adult} Adult(s), {t.num_child} Child(ren) (under 12) • Departure: {formatDate(t.trip?.trip_date)}
+                            {t.trip?.start_time && ` (${formatMauritius(t.trip.start_time, "time")})`}
                           </div>
-                        )}
-                      </td>
-                      <td className="p-3">
-                        <Badge
-                          className={`text-[10px] ${
-                            isCancelled ? "bg-red-100 text-red-700 border-red-200" : "bg-slate-100 text-slate-700"
-                          }`}
-                        >
-                          {t.tb_status || "Pending"}
-                        </Badge>
-                        {isCancelled && t.cancelled_at && (
-                          <div className="text-[9px] text-slate-400 mt-0.5">
-                            Cancelled {formatDate(t.cancelled_at)}
-                          </div>
-                        )}
-                      </td>
-                      <td className="p-3 text-right font-bold text-[#1A202C]">
-                        <span className={isCancelled ? "line-through text-slate-400" : ""}>
-                          {formatCurrency(t.total_amount)}
-                        </span>
-                      </td>
-                      <td className="p-3 text-center print:hidden">
-                        {!isCancelled && canCancel && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() =>
-                              handleOpenAddonCancel(
-                                "trip",
-                                t.trip_trip_id,
-                                t.trip?.tour?.tour_name || "Excursion Trip",
-                                t.total_amount
-                              )
-                            }
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50 text-[11px] h-7 px-2"
+                          {linkedRefund && (
+                            <div className="text-[10px] text-red-600 font-bold mt-0.5">
+                              Refunded: {formatCurrency(linkedRefund.refund_amount)} ({linkedRefund.refund_percentage}%)
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <Badge
+                            className={`text-[10px] ${
+                              isCancelled ? "bg-red-100 text-red-700 border-red-200" : "bg-slate-100 text-slate-700"
+                            }`}
                           >
-                            Cancel
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                            {booking.booking_status === "Cancelled" ? "Cancelled" : (t.tb_status || "Pending")}
+                          </Badge>
+                          {isCancelled && t.cancelled_at && (
+                            <div className="text-[9px] text-slate-400 mt-0.5">
+                              Cancelled {formatDate(t.cancelled_at)}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3 text-right font-bold text-[#1A202C]">
+                          <span className={isCancelled ? "line-through text-slate-400" : ""}>
+                            {formatCurrency(t.total_amount)}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center print:hidden">
+                          {!isCancelled && canCancel && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() =>
+                                handleOpenAddonCancel(
+                                  "trip",
+                                  t.trip_trip_id,
+                                  t.trip?.tour?.tour_name || "Excursion Trip",
+                                  t.total_amount
+                                )
+                              }
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50 text-[11px] h-7 px-2"
+                            >
+                              Cancel
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
               <tfoot className="bg-[#F8F7F4] font-bold text-xs">
                 <tr className="border-t border-slate-200">
