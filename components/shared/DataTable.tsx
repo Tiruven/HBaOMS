@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, FolderOpen } from "lucide-react";
+import { Plus, Search, FolderOpen, Loader2 } from "lucide-react";
 
 export interface Column<T> {
   header: string;
@@ -30,6 +30,7 @@ interface DataTableProps<T> {
   extraAction?: React.ReactNode;
   title: string;
   description?: string;
+  isLoading?: boolean;
 }
 
 export function DataTable<T extends Record<string, any>>({
@@ -42,6 +43,7 @@ export function DataTable<T extends Record<string, any>>({
   extraAction,
   title,
   description,
+  isLoading = false,
 }: DataTableProps<T>) {
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -60,21 +62,21 @@ export function DataTable<T extends Record<string, any>>({
             {title}
           </h1>
           {description && (
-            <p className="text-sm text-slate-500 mt-1">{description}</p>
+            <p className="text-slate-500 text-sm mt-1">{description}</p>
           )}
         </div>
         <div className="flex items-center gap-2">
           {extraAction}
-          <Button onClick={onAddNew} variant="gold" className="gap-2">
+          <Button onClick={onAddNew} variant="gold" className="gap-2 shrink-0">
             <Plus className="h-4 w-4" />
             {addNewLabel}
           </Button>
         </div>
       </div>
 
-      {/* Search Bar */}
-      <div className="flex items-center space-x-2 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-        <Search className="h-4 w-4 text-slate-400 ml-2" />
+      {/* Search Input bar */}
+      <div className="flex items-center space-x-2 bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm max-w-sm">
+        <Search className="h-4 w-4 text-slate-400" />
         <Input
           placeholder={searchPlaceholder}
           value={searchTerm}
@@ -94,7 +96,12 @@ export function DataTable<T extends Record<string, any>>({
       </div>
 
       {/* Table */}
-      {filteredData.length === 0 ? (
+      {isLoading && data.length === 0 ? (
+        <div className="flex flex-col items-center justify-center p-12 text-center bg-white rounded-lg border border-slate-200 shadow-sm min-h-[300px]">
+          <Loader2 className="h-8 w-8 animate-spin text-gold-500 mb-3" />
+          <p className="text-sm text-slate-500 font-medium">Loading records...</p>
+        </div>
+      ) : filteredData.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-12 text-center bg-white rounded-lg border border-slate-200 shadow-sm min-h-[300px]">
           <div className="p-4 rounded-full bg-gold-100 mb-4">
             <FolderOpen className="h-10 w-10 text-gold-600" />

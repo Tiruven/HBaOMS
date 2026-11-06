@@ -7,6 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { Booking, CheckInOut, Payment, ServiceBooking, TripBooking, PricingRule, Refund } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { getImageUrl } from "@/lib/imageUtils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -246,11 +247,7 @@ export default function AdminBookingDetailPage() {
               {/* Room Image */}
               <div className="relative h-48 rounded-xl overflow-hidden bg-slate-100 border border-slate-200">
                 <img
-                  src={
-                    stay?.room?.room_type?.type === "Deluxe Suite"
-                      ? "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"
-                      : "https://images.unsplash.com/photo-1618773928121-c32242e63f39?auto=format&fit=crop&w=800&q=80"
-                  }
+                  src={getImageUrl(stay?.room?.image_path || stay?.room?.room_type?.image_path, "room")}
                   alt="Room preview"
                   className="w-full h-full object-cover"
                 />

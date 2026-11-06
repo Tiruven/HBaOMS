@@ -6,43 +6,11 @@ import { DeleteDialog } from "@/components/shared/DeleteDialog";
 import { RoomTypeModal } from "@/components/modals/RoomTypeModal";
 import { RoomType } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { getImageUrl } from "@/lib/imageUtils";
 import { Button } from "@/components/ui/button";
 import { Pencil, Trash2 } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
-
-const initialRoomTypes: RoomType[] = [
-  {
-    room_type_id: 1,
-    type: "Deluxe Suite",
-    price: 250.0,
-    size: 45.0,
-    created_by: "admin@hbaoms.com",
-    date_created: new Date().toISOString(),
-    updated_by_: "admin@hbaoms.com",
-    date_updated: new Date().toISOString(),
-  },
-  {
-    room_type_id: 2,
-    type: "Standard Double",
-    price: 120.0,
-    size: 28.0,
-    created_by: "admin@hbaoms.com",
-    date_created: new Date().toISOString(),
-    updated_by_: "admin@hbaoms.com",
-    date_updated: new Date().toISOString(),
-  },
-  {
-    room_type_id: 3,
-    type: "Executive Suite",
-    price: 320.0,
-    size: 55.0,
-    created_by: "admin@hbaoms.com",
-    date_created: new Date().toISOString(),
-    updated_by_: "admin@hbaoms.com",
-    date_updated: new Date().toISOString(),
-  },
-];
 
 export default function RoomTypesPage() {
   const { user } = useUser();
@@ -60,8 +28,8 @@ export default function RoomTypesPage() {
       if (!error && data) {
         setRoomTypes(data);
       }
-    } catch {
-      // Keep initial client mock data state
+    } catch (err) {
+      console.error("Error fetching room types:", err);
     }
   }, []);
 
@@ -90,6 +58,7 @@ export default function RoomTypesPage() {
     size: number;
     max_adults: number;
     max_children: number;
+    image_path?: string | null;
   }) => {
     setIsLoading(true);
     const now = new Date().toISOString();
@@ -112,7 +81,7 @@ export default function RoomTypesPage() {
     if (selectedRoomType) {
       // Update
       try {
-        const { error } = await supabase
+        let { error } = await supabase
           .from("room_type")
           .update({
             type: trimmedType,
@@ -120,10 +89,28 @@ export default function RoomTypesPage() {
             size: values.size,
             max_adults: values.max_adults,
             max_children: values.max_children,
+            image_path: values.image_path || null,
             updated_by_: currentUserEmail,
             date_updated: now,
           })
           .eq("room_type_id", selectedRoomType.room_type_id);
+
+        // Fallback retry if schema cache doesn't have image_path yet
+        if (error && error.message?.includes("image_path")) {
+          const retry = await supabase
+            .from("room_type")
+            .update({
+              type: trimmedType,
+              price: values.price,
+              size: values.size,
+              max_adults: values.max_adults,
+              max_children: values.max_children,
+              updated_by_: currentUserEmail,
+              date_updated: now,
+            })
+            .eq("room_type_id", selectedRoomType.room_type_id);
+          error = retry.error;
+        }
 
         if (error) {
           setIsLoading(false);
@@ -142,17 +129,33 @@ export default function RoomTypesPage() {
     } else {
       // Create
       try {
-        const { error } = await supabase.from("room_type").insert([
+        let { error } = await supabase.from("room_type").insert([
           {
             type: trimmedType,
             price: values.price,
             size: values.size,
             max_adults: values.max_adults,
             max_children: values.max_children,
+            image_path: values.image_path || null,
             created_by: currentUserEmail,
             date_created: now,
           },
         ]);
+
+        if (error && error.message?.includes("image_path")) {
+          const retry = await supabase.from("room_type").insert([
+            {
+              type: trimmedType,
+              price: values.price,
+              size: values.size,
+              max_adults: values.max_adults,
+              max_children: values.max_children,
+              created_by: currentUserEmail,
+              date_created: now,
+            },
+          ]);
+          error = retry.error;
+        }
 
         if (error) {
           setIsLoading(false);
@@ -181,6 +184,15 @@ export default function RoomTypesPage() {
     setIsLoading(true);
 
     try {
+      // If room type had an uploaded image, clean up from storage
+      if (selectedRoomType.image_path && !selectedRoomType.image_path.startsWith("http")) {
+        fetch("/api/upload", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image_path: selectedRoomType.image_path }),
+        }).catch((e) => console.warn("Failed to delete storage image on room type delete:", e));
+      }
+
       await supabase
         .from("room_type")
         .delete()
@@ -195,8 +207,24 @@ export default function RoomTypesPage() {
   };
 
   const columns: Column<RoomType>[] = [
-    { header: "ID", accessorKey: "room_type_id", className: "w-16 text-center" },
-    { header: "Type Name", accessorKey: "type" },
+    { header: "ID", accessorKey: "room_type_id", className: "w-14 text-center" },
+    {
+      header: "Photo",
+      className: "w-20",
+      cell: (row) => {
+        const previewUrl = getImageUrl(row.image_path, "room");
+        return (
+          <div className="h-10 w-14 rounded-lg overflow-hidden bg-slate-100 border border-slate-200">
+            <img
+              src={previewUrl}
+              alt={row.type}
+              className="h-full w-full object-cover"
+            />
+          </div>
+        );
+      },
+    },
+    { header: "Type Name", accessorKey: "type", className: "font-semibold text-navy-900" },
     {
       header: "Price / Night",
       cell: (row) => (
@@ -257,11 +285,12 @@ export default function RoomTypesPage() {
     <div>
       <DataTable
         title="Room Types Management"
-        description="Configure room categories, nightly base rates, and room dimensions."
-        columns={columns}
+        description="Configure room categories, nightly base rates, room dimensions, and showcase catalog photography."
         data={roomTypes}
+        columns={columns}
+        isLoading={isLoading}
         searchKey="type"
-        searchPlaceholder="Filter room types..."
+        searchPlaceholder="Filter by room type..."
         onAddNew={handleOpenAdd}
         addNewLabel="Add Room Type"
       />
@@ -279,7 +308,7 @@ export default function RoomTypesPage() {
         onClose={() => setIsDeleteOpen(false)}
         onConfirm={handleConfirmDelete}
         title="Delete Room Type"
-        description={`Are you sure you want to delete room type "${selectedRoomType?.type}"? This action cannot be undone.`}
+        description={`Are you sure you want to delete "${selectedRoomType?.type}"? This may impact active rooms and reservations linked to this category.`}
         isLoading={isLoading}
       />
     </div>

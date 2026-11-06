@@ -1,3 +1,4 @@
+// components/modals/RoomModal.tsx
 "use client";
 
 import React, { useEffect } from "react";
@@ -24,6 +25,7 @@ import {
 } from "@/components/ui/select";
 import { Room, RoomType, Feature } from "@/lib/types";
 import { AuditFieldsView } from "@/components/shared/AuditFields";
+import { ImageUpload } from "@/components/shared/ImageUpload";
 import { Loader2, AlertCircle, Sparkles } from "lucide-react";
 
 const roomSchema = z.object({
@@ -33,9 +35,10 @@ const roomSchema = z.object({
   }),
   room_type_room_type_id: z.coerce.number().min(1, "Please select a room type"),
   feature_ids: z.array(z.number()).optional(),
+  image_path: z.string().nullable().optional(),
 });
 
-type RoomFormValues = z.infer<typeof roomSchema>;
+export type RoomFormValues = z.infer<typeof roomSchema>;
 
 interface RoomModalProps {
   isOpen: boolean;
@@ -71,6 +74,7 @@ export const RoomModal: React.FC<RoomModalProps> = ({
       room_status: "Available",
       room_type_room_type_id: roomTypes[0]?.room_type_id || 1,
       feature_ids: [],
+      image_path: null,
     },
   });
 
@@ -86,6 +90,7 @@ export const RoomModal: React.FC<RoomModalProps> = ({
         room_status: initialData.room_status,
         room_type_room_type_id: initialData.room_type_room_type_id,
         feature_ids: selectedFids,
+        image_path: initialData.image_path || null,
       });
     } else {
       reset({
@@ -93,6 +98,7 @@ export const RoomModal: React.FC<RoomModalProps> = ({
         room_status: "Available",
         room_type_room_type_id: roomTypes[0]?.room_type_id || 1,
         feature_ids: [],
+        image_path: null,
       });
     }
   }, [initialData, roomTypes, reset, isOpen]);
@@ -113,7 +119,7 @@ export const RoomModal: React.FC<RoomModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[520px]">
+      <DialogContent className="sm:max-w-[540px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {initialData ? "Edit Room Details" : "Add New Guest Room"}
@@ -128,6 +134,22 @@ export const RoomModal: React.FC<RoomModalProps> = ({
         )}
 
         <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4 py-2">
+          {/* Specific Room Photo (Optional - Falls back to Room Type) */}
+          <Controller
+            name="image_path"
+            control={control}
+            render={({ field }) => (
+              <ImageUpload
+                value={field.value}
+                onChange={field.onChange}
+                folder="rooms"
+                fallbackCategory="room"
+                label="Room Photo (Optional - defaults to Room Type)"
+                disabled={isLoading}
+              />
+            )}
+          />
+
           <div className="space-y-2">
             <Label htmlFor="room_desc">Room Title / Description *</Label>
             <Input
@@ -160,7 +182,7 @@ export const RoomModal: React.FC<RoomModalProps> = ({
                     <SelectContent>
                       {roomTypes.map((rt) => (
                         <SelectItem key={rt.room_type_id} value={String(rt.room_type_id)}>
-                          {rt.type} (${rt.price})
+                          {rt.type} ({rt.price} MUR)
                         </SelectItem>
                       ))}
                     </SelectContent>

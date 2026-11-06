@@ -6,43 +6,11 @@ import { DeleteDialog } from "@/components/shared/DeleteDialog";
 import { ServiceModal } from "@/components/modals/ServiceModal";
 import { Service } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { getImageUrl } from "@/lib/imageUtils";
 import { Button } from "@/components/ui/button";
 import { Pencil, Trash2 } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
-
-const initialServices: Service[] = [
-  {
-    service_id: 1,
-    service_name: "Spa & Wellness",
-    service_desc: "Full body aromatherapy massage & sauna access",
-    price: 85.0,
-    created_by: "admin@hbaoms.com",
-    date_created: new Date().toISOString(),
-    updated_by_: "admin@hbaoms.com",
-    date_updated: new Date().toISOString(),
-  },
-  {
-    service_id: 2,
-    service_name: "Airport Shuttle",
-    service_desc: "Private luxury SUV airport transfer",
-    price: 45.0,
-    created_by: "admin@hbaoms.com",
-    date_created: new Date().toISOString(),
-    updated_by_: "admin@hbaoms.com",
-    date_updated: new Date().toISOString(),
-  },
-  {
-    service_id: 3,
-    service_name: "Breakfast Buffet",
-    service_desc: "International gourmet morning buffet per guest",
-    price: 25.0,
-    created_by: "admin@hbaoms.com",
-    date_created: new Date().toISOString(),
-    updated_by_: "admin@hbaoms.com",
-    date_updated: new Date().toISOString(),
-  },
-];
 
 export default function ServicesPage() {
   const { user } = useUser();
@@ -60,8 +28,8 @@ export default function ServicesPage() {
       if (!error && data) {
         setServices(data);
       }
-    } catch {
-      // Keep initial client mock data
+    } catch (err) {
+      console.error("Error loading services:", err);
     }
   }, []);
 
@@ -93,6 +61,7 @@ export default function ServicesPage() {
     daily_open_time: string;
     daily_close_time: string;
     capacity: number;
+    image_path?: string | null;
   }) => {
     setIsLoading(true);
     const now = new Date().toISOString();
@@ -115,7 +84,7 @@ export default function ServicesPage() {
     if (selectedService) {
       // Update
       try {
-        const { error } = await supabase
+        let { error } = await supabase
           .from("service")
           .update({
             service_name: trimmedName,
@@ -126,10 +95,30 @@ export default function ServicesPage() {
             daily_open_time: values.daily_open_time,
             daily_close_time: values.daily_close_time,
             capacity: values.capacity,
+            image_path: values.image_path || null,
             updated_by_: currentUserEmail,
             date_updated: now,
           })
           .eq("service_id", selectedService.service_id);
+
+        if (error && error.message?.includes("image_path")) {
+          const retry = await supabase
+            .from("service")
+            .update({
+              service_name: trimmedName,
+              service_desc: values.service_desc,
+              price: values.price,
+              service_type: values.service_type,
+              duration_min: values.duration_min,
+              daily_open_time: values.daily_open_time,
+              daily_close_time: values.daily_close_time,
+              capacity: values.capacity,
+              updated_by_: currentUserEmail,
+              date_updated: now,
+            })
+            .eq("service_id", selectedService.service_id);
+          error = retry.error;
+        }
 
         if (error) {
           setIsLoading(false);
@@ -148,7 +137,7 @@ export default function ServicesPage() {
     } else {
       // Create
       try {
-        const { error } = await supabase.from("service").insert([
+        let { error } = await supabase.from("service").insert([
           {
             service_name: trimmedName,
             service_desc: values.service_desc,
@@ -158,10 +147,29 @@ export default function ServicesPage() {
             daily_open_time: values.daily_open_time,
             daily_close_time: values.daily_close_time,
             capacity: values.capacity,
+            image_path: values.image_path || null,
             created_by: currentUserEmail,
             date_created: now,
           },
         ]);
+
+        if (error && error.message?.includes("image_path")) {
+          const retry = await supabase.from("service").insert([
+            {
+              service_name: trimmedName,
+              service_desc: values.service_desc,
+              price: values.price,
+              service_type: values.service_type,
+              duration_min: values.duration_min,
+              daily_open_time: values.daily_open_time,
+              daily_close_time: values.daily_close_time,
+              capacity: values.capacity,
+              created_by: currentUserEmail,
+              date_created: now,
+            },
+          ]);
+          error = retry.error;
+        }
 
         if (error) {
           setIsLoading(false);
@@ -190,6 +198,14 @@ export default function ServicesPage() {
     setIsLoading(true);
 
     try {
+      if (selectedService.image_path && !selectedService.image_path.startsWith("http")) {
+        fetch("/api/upload", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image_path: selectedService.image_path }),
+        }).catch((e) => console.warn("Failed to delete storage image on service delete:", e));
+      }
+
       await supabase.from("service").delete().eq("service_id", selectedService.service_id);
     } catch (err) {
       console.error("Delete service error:", err);
@@ -201,7 +217,23 @@ export default function ServicesPage() {
   };
 
   const columns: Column<Service>[] = [
-    { header: "ID", accessorKey: "service_id", className: "w-16 text-center" },
+    { header: "ID", accessorKey: "service_id", className: "w-14 text-center" },
+    {
+      header: "Photo",
+      className: "w-20",
+      cell: (row) => {
+        const previewUrl = getImageUrl(row.image_path, "service");
+        return (
+          <div className="h-10 w-14 rounded-lg overflow-hidden bg-slate-100 border border-slate-200">
+            <img
+              src={previewUrl}
+              alt={row.service_name}
+              className="h-full w-full object-cover"
+            />
+          </div>
+        );
+      },
+    },
     {
       header: "Service Name",
       cell: (row) => (
@@ -228,10 +260,6 @@ export default function ServicesPage() {
       cell: (row) => (
         <span className="text-xs text-slate-500">{formatDate(row.date_created)}</span>
       ),
-    },
-    {
-      header: "Created By",
-      cell: (row) => <span className="text-xs text-slate-500">{row.created_by || "System"}</span>,
     },
     {
       header: "Actions",
@@ -264,12 +292,13 @@ export default function ServicesPage() {
   return (
     <div>
       <DataTable
-        title="Services Catalog"
-        description="Manage additional hotel guest services, wellness offerings, and pricing."
-        columns={columns}
+        title="Resort Services Catalog"
+        description="Administer spa wellness, recreational activities, concierge experiences, and dining amenities."
         data={services}
+        columns={columns}
+        isLoading={isLoading}
         searchKey="service_name"
-        searchPlaceholder="Filter services..."
+        searchPlaceholder="Filter services by name..."
         onAddNew={handleOpenAdd}
         addNewLabel="Add Service"
       />
@@ -286,8 +315,8 @@ export default function ServicesPage() {
         isOpen={isDeleteOpen}
         onClose={() => setIsDeleteOpen(false)}
         onConfirm={handleConfirmDelete}
-        title="Delete Service"
-        description={`Are you sure you want to delete service "${selectedService?.service_name}"? This action cannot be undone.`}
+        title="Delete Resort Service"
+        description={`Are you sure you want to delete "${selectedService?.service_name}"? Existing bookings for this service may be affected.`}
         isLoading={isLoading}
       />
     </div>

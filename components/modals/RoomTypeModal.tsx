@@ -1,7 +1,8 @@
+// components/modals/RoomTypeModal.tsx
 "use client";
 
 import React, { useEffect } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import {
@@ -16,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RoomType } from "@/lib/types";
 import { AuditFieldsView } from "@/components/shared/AuditFields";
+import { ImageUpload } from "@/components/shared/ImageUpload";
 import { Loader2, AlertCircle } from "lucide-react";
 
 const roomTypeSchema = z.object({
@@ -24,9 +26,10 @@ const roomTypeSchema = z.object({
   size: z.coerce.number().positive("Size must be greater than 0"),
   max_adults: z.coerce.number().int().min(1, "At least 1 adult required"),
   max_children: z.coerce.number().int().min(0, "Cannot be negative"),
+  image_path: z.string().nullable().optional(),
 });
 
-type RoomTypeFormValues = z.infer<typeof roomTypeSchema>;
+export type RoomTypeFormValues = z.infer<typeof roomTypeSchema>;
 
 interface RoomTypeModalProps {
   isOpen: boolean;
@@ -48,6 +51,7 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
   const {
     register,
     handleSubmit,
+    control,
     reset,
     formState: { errors },
   } = useForm<RoomTypeFormValues>({
@@ -58,6 +62,7 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
       size: 30,
       max_adults: 2,
       max_children: 2,
+      image_path: null,
     },
   });
 
@@ -70,6 +75,7 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
         size: initialData.size,
         max_adults: initialData.max_adults || 2,
         max_children: initialData.max_children ?? 2,
+        image_path: initialData.image_path || null,
       });
     } else {
       reset({
@@ -78,6 +84,7 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
         size: 30,
         max_adults: 2,
         max_children: 2,
+        image_path: null,
       });
     }
   }, [initialData, reset, isOpen]);
@@ -98,7 +105,7 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[540px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {initialData ? "Edit Room Type" : "Add New Room Type"}
@@ -113,11 +120,27 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
         )}
 
         <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4 py-2">
+          {/* Image Upload Component */}
+          <Controller
+            name="image_path"
+            control={control}
+            render={({ field }) => (
+              <ImageUpload
+                value={field.value}
+                onChange={field.onChange}
+                folder="room-types"
+                fallbackCategory="room"
+                label="Room Type Showcase Photo"
+                disabled={isLoading}
+              />
+            )}
+          />
+
           <div className="space-y-2">
             <Label htmlFor="type">Room Type Title *</Label>
             <Input
               id="type"
-              placeholder="e.g. Deluxe Suite"
+              placeholder="e.g. Deluxe Ocean Suite"
               {...register("type")}
             />
             {errors.type && (
@@ -127,12 +150,12 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="price">Price per Night ($) *</Label>
+              <Label htmlFor="price">Price per Night (MUR) *</Label>
               <Input
                 id="price"
                 type="number"
                 step="0.01"
-                placeholder="150.00"
+                placeholder="5000.00"
                 {...register("price")}
               />
               {errors.price && (
@@ -146,7 +169,7 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
                 id="size"
                 type="number"
                 step="0.1"
-                placeholder="35.0"
+                placeholder="45.0"
                 {...register("size")}
               />
               {errors.size && (

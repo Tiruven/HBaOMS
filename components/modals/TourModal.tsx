@@ -1,7 +1,8 @@
+// components/modals/TourModal.tsx
 "use client";
 
 import React, { useEffect } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import {
@@ -16,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tour } from "@/lib/types";
 import { AuditFieldsView } from "@/components/shared/AuditFields";
+import { ImageUpload } from "@/components/shared/ImageUpload";
 import { Loader2, AlertCircle } from "lucide-react";
 
 const tourSchema = z.object({
@@ -24,9 +26,10 @@ const tourSchema = z.object({
   adult_price: z.coerce.number().positive("Adult price must be greater than 0"),
   child_price: z.coerce.number().positive("Child price must be greater than 0"),
   durations: z.coerce.number().int("Hours must be a whole number").positive("Duration must be at least 1 hour"),
+  image_path: z.string().nullable().optional(),
 });
 
-type TourFormValues = z.infer<typeof tourSchema>;
+export type TourFormValues = z.infer<typeof tourSchema>;
 
 interface TourModalProps {
   isOpen: boolean;
@@ -48,6 +51,7 @@ export const TourModal: React.FC<TourModalProps> = ({
   const {
     register,
     handleSubmit,
+    control,
     reset,
     formState: { errors },
   } = useForm<TourFormValues>({
@@ -58,6 +62,7 @@ export const TourModal: React.FC<TourModalProps> = ({
       adult_price: 100,
       child_price: 50,
       durations: 4,
+      image_path: null,
     },
   });
 
@@ -70,6 +75,7 @@ export const TourModal: React.FC<TourModalProps> = ({
         adult_price: initialData.adult_price,
         child_price: initialData.child_price,
         durations: initialData.durations,
+        image_path: initialData.image_path || null,
       });
     } else {
       reset({
@@ -78,6 +84,7 @@ export const TourModal: React.FC<TourModalProps> = ({
         adult_price: 100,
         child_price: 50,
         durations: 4,
+        image_path: null,
       });
     }
   }, [initialData, reset, isOpen]);
@@ -98,7 +105,7 @@ export const TourModal: React.FC<TourModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[550px]">
+      <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {initialData ? "Edit Excursion Tour" : "Add New Excursion Tour"}
@@ -113,12 +120,28 @@ export const TourModal: React.FC<TourModalProps> = ({
         )}
 
         <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4 py-2">
+          {/* Excursion Photo Upload */}
+          <Controller
+            name="image_path"
+            control={control}
+            render={({ field }) => (
+              <ImageUpload
+                value={field.value}
+                onChange={field.onChange}
+                folder="tours"
+                fallbackCategory="tour"
+                label="Excursion Showcase Photo"
+                disabled={isLoading}
+              />
+            )}
+          />
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="tour_name">Tour Name *</Label>
               <Input
                 id="tour_name"
-                placeholder="e.g. Island Excursion"
+                placeholder="e.g. Catamaran Cruise & Snorkeling"
                 {...register("tour_name")}
               />
               {errors.tour_name && (
@@ -146,12 +169,12 @@ export const TourModal: React.FC<TourModalProps> = ({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="adult_price">Adult Rate ($) *</Label>
+              <Label htmlFor="adult_price">Adult Rate (MUR) *</Label>
               <Input
                 id="adult_price"
                 type="number"
                 step="0.01"
-                placeholder="120.00"
+                placeholder="1200.00"
                 {...register("adult_price")}
               />
               {errors.adult_price && (
@@ -162,12 +185,12 @@ export const TourModal: React.FC<TourModalProps> = ({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="child_price">Child Rate ($) *</Label>
+              <Label htmlFor="child_price">Child Rate (MUR) *</Label>
               <Input
                 id="child_price"
                 type="number"
                 step="0.01"
-                placeholder="60.00"
+                placeholder="600.00"
                 {...register("child_price")}
               />
               {errors.child_price && (
@@ -182,7 +205,7 @@ export const TourModal: React.FC<TourModalProps> = ({
             <Label htmlFor="tour_desc">Tour Description (Optional)</Label>
             <Input
               id="tour_desc"
-              placeholder="e.g. Catamaran boat tour with snorkeling and lunch"
+              placeholder="e.g. Catamaran boat tour with snorkeling and lunch at Ile aux Cerfs"
               {...register("tour_desc")}
             />
             {errors.tour_desc && (

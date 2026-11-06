@@ -7,6 +7,7 @@ import { useAuth } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
 import { Room, Service, Tour } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
+import { getImageUrl } from "@/lib/imageUtils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {

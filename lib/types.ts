@@ -14,6 +14,7 @@ export interface RoomType extends AuditFields {
   size: number;
   max_adults?: number;
   max_children?: number;
+  image_path?: string | null;
 }
 
 export interface Feature extends AuditFields {
@@ -29,6 +30,7 @@ export interface Room extends AuditFields {
   room_type_room_type_id: number;
   room_type?: RoomType;
   room_feature?: { feature: Feature }[];
+  image_path?: string | null;
 }
 
 export interface Service extends AuditFields {
@@ -41,6 +43,7 @@ export interface Service extends AuditFields {
   daily_close_time?: string;
   capacity?: number;
   service_type?: "scheduled" | "on_demand";
+  image_path?: string | null;
 }
 
 export interface Tour extends AuditFields {
@@ -50,6 +53,7 @@ export interface Tour extends AuditFields {
   adult_price: number;
   child_price: number;
   durations: number;
+  image_path?: string | null;
 }
 
 export type StaffRole =
@@ -234,3 +238,5 @@ export interface SystemStats {
   totalStaff: number;
   activeBookings: number;
 }
+
+

@@ -8,6 +8,7 @@ import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
 import { Booking, CheckInOut, Service, Tour, Trip, ServiceBooking, TripBooking } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { getImageUrl } from "@/lib/imageUtils";
 import {
   isWithinStayWindow,
   computeSlotEndTime,
@@ -417,31 +418,40 @@ export default function CustomerAddonsPage() {
                       isSelected ? "border-[#A37836] bg-[#F4EFE6]/40" : "border-[#E5E2DC] bg-[#FAF8F5]"
                     }`}
                   >
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-bold text-base text-[#1A202C]">{s.service_name}</h3>
-                          <Badge variant="outline" className="text-[10px] uppercase font-semibold">
-                            {isScheduled ? "Timed Slot" : "On Demand"}
-                          </Badge>
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      <div className="flex items-start gap-4">
+                        <div className="h-16 w-20 sm:h-20 sm:w-28 shrink-0 rounded-xl overflow-hidden bg-slate-200 border border-slate-200/80">
+                          <img
+                            src={getImageUrl(s.image_path, "service")}
+                            alt={s.service_name}
+                            className="h-full w-full object-cover"
+                          />
                         </div>
-                        <p className="text-xs text-slate-500 mt-1">{s.service_desc || "Premium resort amenity."}</p>
-                        {isScheduled && (
-                          <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-1">
-                            <Clock className="h-3 w-3 text-[#A37836]" />
-                            <span>{s.duration_min || 60} minutes • Hours: {s.daily_open_time ? s.daily_open_time.substring(0, 5) : "09:00"} to {s.daily_close_time ? s.daily_close_time.substring(0, 5) : "18:00"}</span>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-base text-[#1A202C]">{s.service_name}</h3>
+                            <Badge variant="outline" className="text-[10px] uppercase font-semibold">
+                              {isScheduled ? "Timed Slot" : "On Demand"}
+                            </Badge>
                           </div>
-                        )}
+                          <p className="text-xs text-slate-500 mt-1">{s.service_desc || "Premium resort amenity."}</p>
+                          {isScheduled && (
+                            <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-1">
+                              <Clock className="h-3 w-3 text-[#A37836]" />
+                              <span>{s.duration_min || 60} minutes • Hours: {s.daily_open_time ? s.daily_open_time.substring(0, 5) : "09:00"} to {s.daily_close_time ? s.daily_close_time.substring(0, 5) : "18:00"}</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
 
-                      <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200">
+                      <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200 w-full sm:w-auto">
                         <span className="font-bold text-base text-[#A37836]">{formatCurrency(s.price)}</span>
                         <Button
                           type="button"
                           variant={isSelected ? "gold" : "outline"}
                           size="sm"
                           onClick={() => handleToggleService(s)}
-                          className="rounded-xl font-semibold"
+                          className="rounded-xl font-semibold shrink-0"
                         >
                           {isSelected ? "Selected ✓" : "Select"}
                         </Button>
@@ -518,12 +528,21 @@ export default function CustomerAddonsPage() {
                 return (
                   <div key={tour.tour_id} className="bg-[#FAF8F5] border border-[#E5E2DC] p-5 rounded-2xl space-y-4">
                     {/* Tour Catalog Header */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/60 pb-3">
-                      <div>
-                        <h3 className="font-extrabold text-base text-[#1A202C]">{tour.tour_name}</h3>
-                        <p className="text-xs text-slate-500 mt-0.5">{tour.tour_desc}</p>
-                        <div className="text-[11px] text-slate-500 mt-1">
-                          Duration: {tour.durations} hours • Standard Rate: {formatCurrency(tour.adult_price)} / adult, {formatCurrency(tour.child_price)} / child
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200/60 pb-3">
+                      <div className="flex items-start gap-4">
+                        <div className="h-20 w-24 sm:h-20 sm:w-28 shrink-0 rounded-xl overflow-hidden bg-slate-200 border border-slate-200/80">
+                          <img
+                            src={getImageUrl(tour.image_path, "tour")}
+                            alt={tour.tour_name}
+                            className="h-full w-full object-cover"
+                          />
+                        </div>
+                        <div>
+                          <h3 className="font-extrabold text-base text-[#1A202C]">{tour.tour_name}</h3>
+                          <p className="text-xs text-slate-500 mt-0.5">{tour.tour_desc}</p>
+                          <div className="text-[11px] text-slate-500 mt-1">
+                            Duration: {tour.durations} hours • Standard Rate: {formatCurrency(tour.adult_price)} / adult, {formatCurrency(tour.child_price)} / child
+                          </div>
                         </div>
                       </div>
                       <Badge className="bg-[#A37836] text-white shrink-0 self-start sm:self-auto text-xs">

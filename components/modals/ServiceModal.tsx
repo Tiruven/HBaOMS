@@ -1,7 +1,8 @@
+// components/modals/ServiceModal.tsx
 "use client";
 
 import React, { useEffect } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import {
@@ -16,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Service } from "@/lib/types";
 import { AuditFieldsView } from "@/components/shared/AuditFields";
+import { ImageUpload } from "@/components/shared/ImageUpload";
 import { Loader2, AlertCircle } from "lucide-react";
 
 const serviceSchema = z.object({
@@ -27,9 +29,10 @@ const serviceSchema = z.object({
   daily_open_time: z.string().min(1, "Opening time required"),
   daily_close_time: z.string().min(1, "Closing time required"),
   capacity: z.coerce.number().int().min(1, "Minimum capacity is 1"),
+  image_path: z.string().nullable().optional(),
 });
 
-type ServiceFormValues = z.infer<typeof serviceSchema>;
+export type ServiceFormValues = z.infer<typeof serviceSchema>;
 
 interface ServiceModalProps {
   isOpen: boolean;
@@ -51,6 +54,7 @@ export const ServiceModal: React.FC<ServiceModalProps> = ({
   const {
     register,
     handleSubmit,
+    control,
     reset,
     watch,
     formState: { errors },
@@ -65,6 +69,7 @@ export const ServiceModal: React.FC<ServiceModalProps> = ({
       daily_open_time: "09:00",
       daily_close_time: "18:00",
       capacity: 5,
+      image_path: null,
     },
   });
 
@@ -82,6 +87,7 @@ export const ServiceModal: React.FC<ServiceModalProps> = ({
         daily_open_time: initialData.daily_open_time ? initialData.daily_open_time.substring(0, 5) : "09:00",
         daily_close_time: initialData.daily_close_time ? initialData.daily_close_time.substring(0, 5) : "18:00",
         capacity: initialData.capacity || 5,
+        image_path: initialData.image_path || null,
       });
     } else {
       reset({
@@ -93,6 +99,7 @@ export const ServiceModal: React.FC<ServiceModalProps> = ({
         daily_open_time: "09:00",
         daily_close_time: "18:00",
         capacity: 5,
+        image_path: null,
       });
     }
   }, [initialData, reset, isOpen]);
@@ -128,6 +135,22 @@ export const ServiceModal: React.FC<ServiceModalProps> = ({
         )}
 
         <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4 py-2">
+          {/* Service Photo Upload */}
+          <Controller
+            name="image_path"
+            control={control}
+            render={({ field }) => (
+              <ImageUpload
+                value={field.value}
+                onChange={field.onChange}
+                folder="services"
+                fallbackCategory="service"
+                label="Service Showcase Photo"
+                disabled={isLoading}
+              />
+            )}
+          />
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="service_name">Service Name *</Label>

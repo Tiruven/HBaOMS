@@ -7,6 +7,7 @@ import { useUser } from "@clerk/nextjs";
 import { supabase } from "@/lib/supabaseClient";
 import { Room, PricingRule } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { getImageUrl } from "@/lib/imageUtils";
 import { calculateVat } from "@/lib/pricing";
 import { StepIndicator } from "@/components/customer/StepIndicator";
 import { PricingBadge } from "@/components/customer/PricingBadge";
@@ -460,18 +461,26 @@ export default function BookingWizardPage() {
                 <div
                   key={room.room_id}
                   onClick={() => setSelectedRoom(room)}
-                  className={`p-5 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between ${
+                  className={`rounded-2xl border cursor-pointer transition-all flex flex-col justify-between overflow-hidden shadow-sm hover:shadow-md ${
                     isSelected
                       ? "border-[#A37836] bg-[#F4EFE6] ring-2 ring-[#A37836]"
                       : "border-[#E5E2DC] hover:border-[#A37836]/60 bg-white"
                   }`}
                 >
-                  <div className="space-y-3">
+                  <div className="h-32 w-full bg-slate-100 overflow-hidden relative">
+                    <img
+                      src={getImageUrl(room.image_path || room.room_type?.image_path, "room")}
+                      alt={room.room_type?.type || "Room"}
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute top-2 left-2 bg-[#1A202C]/80 backdrop-blur-sm text-white text-[11px] font-semibold px-2.5 py-0.5 rounded-full">
+                      Room #{room.room_id}
+                    </div>
+                  </div>
+
+                  <div className="p-4 space-y-3">
                     <div className="flex justify-between items-start">
                       <div>
-                        <span className="text-xs font-bold text-[#A37836] uppercase tracking-wider block">
-                          Room #{room.room_id}
-                        </span>
                         <h3 className="font-bold text-base text-[#1A202C]">{room.room_type?.type}</h3>
                       </div>
                       <div className="text-right">
@@ -482,17 +491,17 @@ export default function BookingWizardPage() {
                         />
                       </div>
                     </div>
-                    <p className="text-xs text-slate-500 leading-relaxed">
+                    <p className="text-xs text-slate-500 leading-relaxed line-clamp-2">
                       {room.room_desc || "Luxurious suite with private ocean terrace and king bed."}
                     </p>
                     <div className="flex items-center gap-3 text-[11px] text-slate-500">
                       <span>Max {room.room_type?.max_adults || 2} Adults</span>
-                      <span>-</span>
+                      <span>•</span>
                       <span>Max {room.room_type?.max_children ?? 2} Children</span>
                     </div>
                   </div>
 
-                  <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between">
+                  <div className="px-4 py-3 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between">
                     <span className="text-xs font-semibold text-[#A37836]">
                       {isSelected ? "✓ Currently Selected" : "Click to Select"}
                     </span>

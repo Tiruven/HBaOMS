@@ -1,10 +1,10 @@
 // components/customer/RoomCard.tsx
 import React from "react";
-import Image from "next/image";
-import { Room, Feature } from "@/lib/types";
+import { Room } from "@/lib/types";
 import { PricingBadge } from "./PricingBadge";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { getImageUrl } from "@/lib/imageUtils";
 import { BedDouble, Users, Maximize2, Sparkles, Check } from "lucide-react";
 
 interface RoomCardProps {
@@ -14,12 +14,6 @@ interface RoomCardProps {
   onSelect?: (room: Room) => void;
   isSelected?: boolean;
 }
-
-const DEFAULT_ROOM_IMAGES: Record<string, string> = {
-  Deluxe: "https://images.unsplash.com/photo-1611892440504-42a792e24d32?auto=format&fit=crop&w=800&q=80",
-  Suite: "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80",
-  Villa: "https://images.unsplash.com/photo-1602002418082-a4443e081dd1?auto=format&fit=crop&w=800&q=80",
-};
 
 export const RoomCard: React.FC<RoomCardProps> = ({
   room,
@@ -31,7 +25,11 @@ export const RoomCard: React.FC<RoomCardProps> = ({
   const roomTypeName = room.room_type?.type || "Standard Room";
   const basePrice = room.room_type?.price || 5000;
   const roomSize = room.room_type?.size || 35;
-  const imageUrl = DEFAULT_ROOM_IMAGES[roomTypeName] || DEFAULT_ROOM_IMAGES.Deluxe;
+  const maxAdults = room.room_type?.max_adults || 2;
+  const maxChildren = room.room_type?.max_children ?? 2;
+
+  // Resolve custom uploaded photo (from room or room_type) or fallback
+  const imageUrl = getImageUrl(room.image_path || room.room_type?.image_path, "room");
 
   return (
     <div
@@ -78,7 +76,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
             </div>
             <div className="flex items-center gap-1.5">
               <Users className="h-4 w-4 text-[#A37836]" />
-              <span>2 Guests</span>
+              <span>Max {maxAdults + maxChildren} Guests</span>
             </div>
           </div>
 
