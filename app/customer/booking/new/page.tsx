@@ -176,11 +176,25 @@ export default function BookingWizardPage() {
         }
         if (prRes.data) setPricingRules(prRes.data);
 
-        // Pre-fill dates using Mauritius calendar
+        // Pre-fill dates using search params if provided, or default to Mauritius calendar
+        const paramCheckIn = searchParams.get("checkIn");
+        const paramCheckOut = searchParams.get("checkOut");
+        const paramAdults = searchParams.get("adults");
+        const paramChildren = searchParams.get("children");
+
         const todayStr = mauritiusToday();
         const tomorrowStr = addDaysToMauritiusDate(todayStr, 3);
-        setCheckInDate(todayStr);
-        setCheckOutDate(tomorrowStr);
+        setCheckInDate(paramCheckIn || todayStr);
+        setCheckOutDate(paramCheckOut || tomorrowStr);
+
+        if (paramAdults) {
+          const a = Number(paramAdults);
+          if (!isNaN(a) && a >= 1) setNumAdults(a);
+        }
+        if (paramChildren) {
+          const c = Number(paramChildren);
+          if (!isNaN(c) && c >= 0) setNumChildren(c);
+        }
 
         // Pre-fill user profile
         if (user) {

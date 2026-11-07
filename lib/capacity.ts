@@ -98,3 +98,39 @@ export async function checkTripCapacity(
     remainingSeats,
   };
 }
+
+/**
+ * High-performance batch calculator for trip seat availability.
+ * Replaces N individual database queries with a single aggregation.
+ */
+export async function getTripsRemainingSeatsBatch(
+  supabase: SupabaseClient,
+  tripList: { trip_id: number; capacity?: number }[]
+): Promise<Record<number, number>> {
+  if (!tripList || tripList.length === 0) return {};
+
+  const tripIds = tripList.map((t) => t.trip_id);
+
+  const { data: bookings } = await supabase
+    .from("trip_booking")
+    .select("trip_trip_id, num_adult, num_child, tb_status, booking!inner(booking_status)")
+    .in("trip_trip_id", tripIds)
+    .neq("booking.booking_status", "Cancelled");
+
+  const bookedSeatsMap: Record<number, number> = {};
+  (bookings || []).forEach((b: any) => {
+    if (b.tb_status !== "Cancelled") {
+      const seats = (Number(b.num_adult) || 0) + (Number(b.num_child) || 0);
+      bookedSeatsMap[b.trip_trip_id] = (bookedSeatsMap[b.trip_trip_id] || 0) + seats;
+    }
+  });
+
+  const seatMap: Record<number, number> = {};
+  tripList.forEach((t) => {
+    const booked = bookedSeatsMap[t.trip_id] || 0;
+    const cap = t.capacity || 20;
+    seatMap[t.trip_id] = Math.max(0, cap - booked);
+  });
+
+  return seatMap;
+}

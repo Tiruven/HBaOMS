@@ -18,7 +18,7 @@ import {
   formatMauritius,
 } from "@/lib/timeUtils";
 import { calculateVat, calculateTotalWithVat, calculateTourPrice } from "@/lib/pricing";
-import { checkServiceSlotCapacity, checkTripCapacity } from "@/lib/capacity";
+import { checkServiceSlotCapacity, getTripsRemainingSeatsBatch } from "@/lib/capacity";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -103,13 +103,9 @@ export default function CustomerAddonsPage() {
         if (sbRes.data) setExistingServiceBookings(sbRes.data);
         if (tbRes.data) setExistingTripBookings(tbRes.data);
 
-        // Compute seat availability for all trips
-        if (tripRes.data) {
-          const seatMap: Record<number, number> = {};
-          for (const t of tripRes.data) {
-            const capResult = await checkTripCapacity(supabase, t.trip_id);
-            seatMap[t.trip_id] = capResult.remainingSeats;
-          }
+        // Batch compute seat availability for all trips in a single fast query
+        if (tripRes.data && tripRes.data.length > 0) {
+          const seatMap = await getTripsRemainingSeatsBatch(supabase, tripRes.data);
           setTripRemainingSeats(seatMap);
         }
       } catch (err: any) {

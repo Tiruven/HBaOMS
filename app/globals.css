@@ -4,6 +4,7 @@
 
 :root {
   --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  --font-serif: var(--font-sans);
 }
 
 body {
@@ -30,4 +31,135 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #94A3B8;
+}
+
+/* ===== Landing Page Animations ===== */
+
+/* Fade up - default hidden state */
+.anim-fade-up {
+  opacity: 0;
+  transform: translateY(40px);
+  transition: opacity 0.75s ease, transform 0.75s ease;
+}
+
+/* Fade in from left */
+.anim-fade-left {
+  opacity: 0;
+  transform: translateX(-40px);
+  transition: opacity 0.75s ease, transform 0.75s ease;
+}
+
+/* Fade in from right */
+.anim-fade-right {
+  opacity: 0;
+  transform: translateX(40px);
+  transition: opacity 0.75s ease, transform 0.75s ease;
+}
+
+/* Visible state - applied by IntersectionObserver */
+.anim-visible {
+  opacity: 1 !important;
+  transform: translate(0, 0) !important;
+}
+
+/* Stagger delays for child elements */
+.anim-delay-100 { transition-delay: 100ms; }
+.anim-delay-200 { transition-delay: 200ms; }
+.anim-delay-300 { transition-delay: 300ms; }
+.anim-delay-400 { transition-delay: 400ms; }
+.anim-delay-500 { transition-delay: 500ms; }
+.anim-delay-600 { transition-delay: 600ms; }
+
+/* Smooth scroll */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Hero text shimmer on load */
+@keyframes hero-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+    letter-spacing: 0.05em;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    letter-spacing: -0.01em;
+  }
+}
+
+.hero-title {
+  animation: hero-reveal 1.1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.hero-subtitle {
+  animation: hero-reveal 1.1s cubic-bezier(0.16, 1, 0.3, 1) 0.25s forwards;
+  opacity: 0;
+}
+
+.hero-cta {
+  animation: hero-reveal 1.1s cubic-bezier(0.16, 1, 0.3, 1) 0.5s forwards;
+  opacity: 0;
+}
+
+/* Navbar scroll shrink effect */
+.nav-scrolled {
+  background: rgba(26, 32, 44, 0.97) !important;
+  backdrop-filter: blur(16px);
+}
+
+/* Card hover lift effect */
+.card-lift {
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card-lift:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.12);
+}
+
+/* Gold shimmer divider */
+.gold-divider {
+  width: 60px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #A37836, transparent);
+  margin: 0 auto;
+}
+
+/* Video overlay gradient */
+.video-overlay {
+  background: linear-gradient(
+    to bottom,
+    rgba(26, 32, 44, 0.5) 0%,
+    rgba(26, 32, 44, 0.2) 40%,
+    rgba(26, 32, 44, 0.6) 80%,
+    rgba(26, 32, 44, 0.9) 100%
+  );
+}
+
+/* Booking bar slide up */
+@keyframes slide-up-bar {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.booking-bar {
+  animation: slide-up-bar 0.6s cubic-bezier(0.16, 1, 0.3, 1) 1.5s forwards;
+  opacity: 0;
+}
+
+/* Section heading serif style */
+.section-heading {
+  font-family: var(--font-serif);
+  letter-spacing: -0.01em;
+}
+
+/* Image zoom on hover */
+.img-zoom {
+  transition: transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.img-zoom-wrap:hover .img-zoom {
+  transform: scale(1.07);
 }

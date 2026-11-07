@@ -12,26 +12,34 @@ interface PricingBadgeProps {
 export const PricingBadge: React.FC<PricingBadgeProps> = ({ basePrice, rateOverride, reason }) => {
   if (!rateOverride || rateOverride === 0) {
     return (
-      <div className="flex items-baseline gap-1">
-        <span className="text-xl font-extrabold text-[#1A202C]">{formatCurrency(basePrice)}</span>
-        <span className="text-xs text-slate-500 font-medium">/ night</span>
+      <div className="flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-1.5">
+        <span className="text-lg sm:text-xl font-extrabold text-[#1A202C] tracking-tight leading-none whitespace-nowrap">
+          {formatCurrency(basePrice)}
+        </span>
+        <span className="text-xs text-slate-500 font-medium whitespace-nowrap">/ night</span>
       </div>
     );
   }
 
-  const effectivePrice = basePrice * (1 + rateOverride / 100);
+  const effectivePrice = Math.round(basePrice * (1 + rateOverride / 100));
   const isSurcharge = rateOverride > 0;
 
   return (
     <div className="space-y-1">
-      <div className="flex items-center gap-2">
-        <span className="text-xl font-extrabold text-[#1A202C]">{formatCurrency(effectivePrice)}</span>
-        <span className="text-xs text-slate-400 line-through font-medium">{formatCurrency(basePrice)}</span>
-        <span className="text-xs text-slate-500 font-medium">/ night</span>
+      <div className="flex flex-wrap items-baseline gap-1.5">
+        <span className="text-lg sm:text-xl font-extrabold text-[#1A202C] tracking-tight leading-none whitespace-nowrap">
+          {formatCurrency(effectivePrice)}
+        </span>
+        <span className="text-xs text-slate-400 line-through font-medium whitespace-nowrap">
+          {formatCurrency(basePrice)}
+        </span>
+        <span className="text-xs text-slate-500 font-medium whitespace-nowrap">/ night</span>
       </div>
       <Badge
-        className={`text-[10px] ${
-          isSurcharge ? "bg-amber-100 text-amber-800 border-amber-200" : "bg-emerald-100 text-emerald-800 border-emerald-200"
+        className={`text-[10px] py-0 px-1.5 ${
+          isSurcharge
+            ? "bg-amber-100 text-amber-800 border-amber-200"
+            : "bg-emerald-100 text-emerald-800 border-emerald-200"
         }`}
       >
         {isSurcharge ? `+${rateOverride}%` : `${rateOverride}%`} {reason ? `(${reason})` : ""}

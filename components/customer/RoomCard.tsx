@@ -5,7 +5,7 @@ import { PricingBadge } from "./PricingBadge";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { getImageUrl } from "@/lib/imageUtils";
-import { BedDouble, Users, Maximize2, Sparkles, Check } from "lucide-react";
+import { Users, Maximize2, Sparkles, Check } from "lucide-react";
 
 interface RoomCardProps {
   room: Room;
@@ -71,10 +71,6 @@ export const RoomCard: React.FC<RoomCardProps> = ({
               <span>{roomSize} m²</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <BedDouble className="h-4 w-4 text-[#A37836]" />
-              <span>King Bed</span>
-            </div>
-            <div className="flex items-center gap-1.5">
               <Users className="h-4 w-4 text-[#A37836]" />
               <span>Max {maxAdults + maxChildren} Guests</span>
             </div>
@@ -105,12 +101,14 @@ export const RoomCard: React.FC<RoomCardProps> = ({
       </div>
 
       {/* Footer Pricing & CTA */}
-      <div className="p-5 pt-0 border-t border-slate-100 flex items-center justify-between">
-        <PricingBadge basePrice={basePrice} rateOverride={rateOverride} reason={overrideReason} />
+      <div className="p-5 pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <PricingBadge basePrice={basePrice} rateOverride={rateOverride} reason={overrideReason} />
+        </div>
         {onSelect && (
           <Button
             onClick={() => onSelect(room)}
-            className={`gap-1.5 ${
+            className={`shrink-0 gap-1.5 text-xs px-3.5 py-2 h-9 font-semibold rounded-xl ${
               isSelected
                 ? "bg-emerald-600 hover:bg-emerald-700 text-white"
                 : "bg-[#A37836] hover:bg-[#8B6327] text-white"
