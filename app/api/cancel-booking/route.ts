@@ -12,6 +12,7 @@ import {
 } from "@/lib/pricing";
 import { executeStripeAndDbRefund } from "@/lib/refundHelper";
 import { nowInstant } from "@/lib/time";
+import { sendEmail, buildCancellationHtml } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 
@@ -222,19 +223,51 @@ export async function POST(req: Request) {
         .neq("tb_status", "Cancelled");
     }
 
-    // Log cancellation notification record
+    // Log cancellation notification record and send email
     if (booking.customer_cust_id) {
-      await supabase.from("notification").insert([
-        {
-          customer_cust_id: booking.customer_cust_id,
-          booking_booking_id: idNum,
-          notif_type: "Cancellation",
-          notif_status: "Pending",
-          sent_date: now,
-          created_by: emailToUse,
-          date_created: now,
-        },
-      ]);
+      const { data: notifRow } = await supabase
+        .from("notification")
+        .insert([
+          {
+            customer_cust_id: booking.customer_cust_id,
+            booking_booking_id: idNum,
+            notif_type: "Cancellation",
+            notif_status: "Pending",
+            sent_date: now,
+            created_by: emailToUse,
+            date_created: now,
+          },
+        ])
+        .select("notif_id")
+        .maybeSingle();
+
+      const customerEmail = booking.customer?.email || emailToUse;
+      const guestName = `${booking.customer?.cust_fname || "Guest"} ${booking.customer?.cust_lname || ""}`.trim();
+
+      if (customerEmail && notifRow) {
+        const { subject, html } = buildCancellationHtml({
+          guestName,
+          bookingId: idNum,
+          roomTypeName: stay?.room?.room_type?.type || "Reserved Accommodation",
+          refundAmount: totalRefundAmount,
+          reason,
+        });
+
+        const emailRes = await sendEmail({
+          to: customerEmail,
+          subject,
+          html,
+        });
+
+        await supabase
+          .from("notification")
+          .update({
+            notif_status: emailRes.success ? "Sent" : "Failed",
+            date_updated: now,
+            updated_by_: emailRes.success ? "Nodemailer" : `Error: ${emailRes.error || "Failed"}`,
+          })
+          .eq("notif_id", notifRow.notif_id);
+      }
     }
 
     return NextResponse.json({

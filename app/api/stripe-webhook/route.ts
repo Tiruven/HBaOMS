@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabase } from "@/lib/supabaseClient";
 import { nowInstant, mauritiusToday, mauritiusToInstant, startOfMauritiusDay } from "@/lib/time";
+import { sendEmail, buildBookingConfirmationHtml } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 
@@ -234,8 +235,53 @@ export async function POST(req: Request) {
 
       const paymentId = payRow?.payment_id;
 
-      // Note: Per v5.1, Flow 1 wizard handles room, board plan, and packages only.
-      // All services and tours/trips are booked post-confirmation in the client portal.
+      // Deduplication guard: Insert notification record only if not already created by verify-payment
+      const { data: notifRow, error: notifErr } = await supabase
+        .from("notification")
+        .insert([
+          {
+            customer_cust_id: custId,
+            booking_booking_id: bookingId,
+            notif_type: "Booking Confirmation",
+            notif_status: "Pending",
+            sent_date: new Date().toISOString(),
+            created_by: "Stripe Webhook",
+            date_created: new Date().toISOString(),
+          },
+        ])
+        .select("notif_id")
+        .maybeSingle();
+
+      // Send email if webhook is the one who created the notification record
+      if (!notifErr && notifRow && guestEmail) {
+        const { subject, html } = buildBookingConfirmationHtml({
+          guestName: `${guestFname || "Guest"} ${guestLname || "Customer"}`.trim(),
+          bookingId,
+          roomTypeName: metadata.roomTypeName || "Luxury Accommodation",
+          roomId: roomId ? Number(roomId) : undefined,
+          checkInDate: checkInDate || today,
+          checkOutDate: checkOutDate || today,
+          boardType: boardType || "RO",
+          numAdults: Number(numAdults) || 1,
+          numChildren: Number(numChildren) || 0,
+          totalAmount: amountPaid,
+        });
+
+        const emailRes = await sendEmail({
+          to: guestEmail,
+          subject,
+          html,
+        });
+
+        await supabase
+          .from("notification")
+          .update({
+            notif_status: emailRes.success ? "Sent" : "Failed",
+            date_updated: new Date().toISOString(),
+            updated_by_: emailRes.success ? "Nodemailer" : `Error: ${emailRes.error || "Failed"}`,
+          })
+          .eq("notif_id", notifRow.notif_id);
+      }
 
       console.log(`Webhook successfully processed session: ${session.id} for booking: ${bookingId}`);
       return NextResponse.json({ received: true });

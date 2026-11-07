@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { checkServiceSlotCapacity, checkTripCapacity } from "@/lib/capacity";
 import { executeStripeAndDbRefund } from "@/lib/refundHelper";
 import { nowInstant, mauritiusToday, mauritiusToInstant, startOfMauritiusDay } from "@/lib/time";
+import { sendEmail, buildBookingConfirmationHtml } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 
@@ -375,18 +376,54 @@ export async function POST(req: Request) {
     // Note: Per v5.1, Flow 1 wizard handles room, board plan, and packages only.
     // All services and tours/trips are booked post-confirmation in the client portal.
 
-    // Insert notification
-    await supabase.from("notification").insert([
-      {
-        customer_cust_id: custId,
-        booking_booking_id: bookingId,
-        notif_type: "Booking Confirmation",
-        notif_status: "Pending",
-        sent_date: new Date().toISOString(),
-        created_by: "Stripe Verify",
-        date_created: new Date().toISOString(),
-      },
-    ]);
+    // Insert notification (with deduplication guard)
+    const { data: notifRow, error: notifErr } = await supabase
+      .from("notification")
+      .insert([
+        {
+          customer_cust_id: custId,
+          booking_booking_id: bookingId,
+          notif_type: "Booking Confirmation",
+          notif_status: "Pending",
+          sent_date: new Date().toISOString(),
+          created_by: "Stripe Verify",
+          date_created: new Date().toISOString(),
+        },
+      ])
+      .select("notif_id")
+      .maybeSingle();
+
+    // Send confirmation email asynchronously if notification was created by this handler
+    if (!notifErr && notifRow && guestEmail) {
+      const { subject, html } = buildBookingConfirmationHtml({
+        guestName: `${guestFname} ${guestLname}`.trim(),
+        bookingId,
+        roomTypeName: meta.roomTypeName || "Luxury Accommodation",
+        roomId,
+        checkInDate: checkInDate || today,
+        checkOutDate: checkOutDate || today,
+        boardType,
+        numAdults,
+        numChildren,
+        totalAmount: amountPaid,
+      });
+
+      const emailRes = await sendEmail({
+        to: guestEmail,
+        subject,
+        html,
+      });
+
+      // Update notification record with delivery outcome
+      await supabase
+        .from("notification")
+        .update({
+          notif_status: emailRes.success ? "Sent" : "Failed",
+          date_updated: new Date().toISOString(),
+          updated_by_: emailRes.success ? "Nodemailer" : `Error: ${emailRes.error || "Failed"}`,
+        })
+        .eq("notif_id", notifRow.notif_id);
+    }
 
     return NextResponse.json({ success: true, bookingId, custId });
   } catch (error: any) {
