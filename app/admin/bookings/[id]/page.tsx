@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import { useStaffRole } from "@/lib/roleContext";
 import { supabase } from "@/lib/supabaseClient";
 import { Booking, CheckInOut, Payment, ServiceBooking, TripBooking, PricingRule, Refund } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -42,6 +43,8 @@ import { Textarea } from "@/components/ui/textarea";
 export default function AdminBookingDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { role } = useStaffRole();
+  const isReceptionist = role === "Receptionist";
   const bookingId = params.id;
 
   const [booking, setBooking] = useState<Booking | null>(null);
@@ -57,36 +60,34 @@ export default function AdminBookingDetailPage() {
   const [isCancelling, setIsCancelling] = useState<boolean>(false);
   const [cancelResult, setCancelResult] = useState<any>(null);
 
-  useEffect(() => {
-    async function fetchAllBookingDetails() {
-      if (!bookingId) return;
-      setLoading(true);
-      try {
-        const idNum = Number(bookingId);
-        const [bRes, cioRes, pRes, sbRes, tbRes, prRes, rfRes] = await Promise.all([
-          supabase.from("booking").select("*, customer(*)").eq("booking_id", idNum).single(),
-          supabase.from("check_in_out").select("*, room(*, room_type(*))").eq("booking_booking_id", idNum).maybeSingle(),
-          supabase.from("payment").select("*").eq("booking_booking_id", idNum),
-          supabase.from("service_booking").select("*, service(*)").eq("booking_booking_id", idNum),
-          supabase.from("trip_booking").select("*, trip(*, tour(*))").eq("booking_booking_id", idNum),
-          supabase.from("pricing_rule").select("*"),
-          supabase.from("refund").select("*").eq("booking_booking_id", idNum).order("refund_date", { ascending: false }),
-        ]);
+  const fetchAllBookingDetails = async () => {
+    if (!bookingId) return;
+    setLoading(true);
+    try {
+      const idNum = Number(bookingId);
+      const [recRes, prRes] = await Promise.all([
+        fetch(`/api/operations/reception?bookingId=${idNum}`),
+        supabase.from("pricing_rule").select("*"),
+      ]);
 
-        if (bRes.data) setBooking(bRes.data);
-        if (cioRes.data) setStay(cioRes.data);
-        if (pRes.data) setPayments(pRes.data);
-        if (sbRes.data) setServices(sbRes.data);
-        if (tbRes.data) setTrips(tbRes.data);
-        if (prRes.data) setPricingRules(prRes.data);
-        if (rfRes.data) setRefunds(rfRes.data);
-      } catch (err) {
-        console.error("Error loading admin booking detail:", err);
-      } finally {
-        setLoading(false);
+      if (recRes.ok) {
+        const recJson = await recRes.json();
+        setBooking(recJson.booking || null);
+        setStay(recJson.stay || null);
+        setPayments(recJson.payments || []);
+        setServices(recJson.services || []);
+        setTrips(recJson.trips || []);
+        setRefunds(recJson.refunds || []);
       }
+      if (prRes.data) setPricingRules(prRes.data);
+    } catch (err) {
+      console.error("Error loading admin booking detail:", err);
+    } finally {
+      setLoading(false);
     }
+  };
 
+  useEffect(() => {
     fetchAllBookingDetails();
   }, [bookingId]);
 
@@ -118,27 +119,16 @@ export default function AdminBookingDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           bookingId: booking.booking_id,
-          reason: cancelReason || "Cancelled by admin",
-          userEmail: "admin@hbaoms.com",
+          reason:
+            cancelReason ||
+            (isReceptionist ? "Guest-requested cancellation via Reception" : "Cancelled by admin"),
+          isHotelInitiated: false,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to cancel");
       setCancelResult(data);
-      // Refresh booking data
-      const { data: refreshed } = await supabase
-        .from("booking")
-        .select("*, customer(*)")
-        .eq("booking_id", booking.booking_id)
-        .single();
-      if (refreshed) setBooking(refreshed);
-      // Refresh refunds
-      const { data: rfData } = await supabase
-        .from("refund")
-        .select("*")
-        .eq("booking_booking_id", booking.booking_id)
-        .order("refund_date", { ascending: false });
-      if (rfData) setRefunds(rfData);
+      await fetchAllBookingDetails();
     } catch (err: any) {
       console.error("Admin cancellation error:", err);
       setCancelResult({ error: err.message });
@@ -217,13 +207,14 @@ export default function AdminBookingDetailPage() {
           <Button variant="outline" onClick={() => window.print()} className="gap-2">
             <Printer className="h-4 w-4" /> Print Dossier
           </Button>
-          {booking.booking_status !== "Cancelled" && booking.booking_status !== "Checked Out" && (
+          {booking.booking_status !== "Cancelled" && booking.booking_status !== "Checked Out" && booking.booking_status !== "No Show" && (
             <Button
               variant="destructive"
               className="gap-2"
               onClick={() => { setCancelReason(""); setCancelResult(null); setIsCancelOpen(true); }}
             >
-              <XCircle className="h-4 w-4" /> Cancel Booking
+              <XCircle className="h-4 w-4" />
+              {isReceptionist ? "Guest-Requested Cancel" : "Cancel Booking"}
             </Button>
           )}
         </div>
@@ -485,7 +476,10 @@ export default function AdminBookingDetailPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-600">
-              <AlertTriangle className="h-5 w-5" /> Cancel Booking #{booking.booking_id}
+              <AlertTriangle className="h-5 w-5" />
+              {isReceptionist
+                ? `Guest-Requested Cancellation - Booking #${booking.booking_id}`
+                : `Cancel Booking #${booking.booking_id}`}
             </DialogTitle>
           </DialogHeader>
 
@@ -515,8 +509,9 @@ export default function AdminBookingDetailPage() {
           ) : (
             <div className="space-y-4 py-2">
               <p className="text-sm text-slate-600">
-                This will cancel the booking and process applicable refunds based on the tier policy.
-                Service and excursion add-ons will also be cancelled.
+                {isReceptionist
+                  ? "Guest-Requested Cancellation (v5 policy applied, logged under your staff account). Applicable tier fees and Stripe refunds will be processed, and add-ons will also be cancelled."
+                  : "This will cancel the booking and process applicable refunds based on the tier policy. Service and excursion add-ons will also be cancelled."}
               </p>
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
                 <p className="font-semibold flex items-center gap-1">

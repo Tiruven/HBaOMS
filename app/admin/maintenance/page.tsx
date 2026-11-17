@@ -1,17 +1,10 @@
 // app/admin/maintenance/page.tsx
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { useUser } from "@clerk/nextjs";
-import { supabase } from "@/lib/supabaseClient";
-import { MaintenanceRequest, Room } from "@/lib/types";
+import React, { useEffect, useState, useCallback } from "react";
+import { useStaffRole } from "@/lib/roleContext";
 import { formatDate } from "@/lib/utils";
-import {
-  nowInstant,
-  mauritiusToday,
-  startOfMauritiusDay,
-  instantToMauritiusParts,
-} from "@/lib/time";
+import { mauritiusToday, instantToMauritiusParts } from "@/lib/time";
 import { SkeletonTable } from "@/components/shared/SkeletonTable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,171 +25,163 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Search, Trash2, Edit, Wrench, AlertTriangle, CheckCircle, Clock } from "lucide-react";
+import {
+  Plus,
+  Search,
+  Edit,
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  Wrench,
+} from "lucide-react";
 
 export default function MaintenancePage() {
-  const { user } = useUser();
-  const [requests, setRequests] = useState<MaintenanceRequest[]>([]);
-  const [rooms, setRooms] = useState<Room[]>([]);
+  const { role } = useStaffRole();
+  const canWrite = role === "Admin" || role === "Maintenance Supervisor";
+
+  const [requests, setRequests] = useState<any[]>([]);
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [blockedAlerts, setBlockedAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Modal
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
-  const [isDeleteOpen, setIsDeleteOpen] = useState<boolean>(false);
-  const [selectedMR, setSelectedMR] = useState<MaintenanceRequest | null>(null);
+  const [selectedMR, setSelectedMR] = useState<any | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
   // Form
   const [roomId, setRoomId] = useState<string>("");
   const [mrDesc, setMrDesc] = useState<string>("");
   const [priority, setPriority] = useState<"Low" | "Medium" | "High" | "Urgent">("Medium");
-  const [requestStatus, setRequestStatus] = useState<MaintenanceRequest["request_status"]>("Open");
+  const [requestStatus, setRequestStatus] = useState<"Pending" | "In Progress" | "Completed" | "Cancelled">("Pending");
   const [requestDate, setRequestDate] = useState<string>("");
   const [formError, setFormError] = useState<string>("");
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [mRes, rRes] = await Promise.all([
-        supabase.from("maintenance_request").select("*, room(*)").order("maintenance_id", { ascending: false }),
-        supabase.from("room").select("*").order("room_id", { ascending: true }),
-      ]);
-
-      if (mRes.error) {
-        console.error("Fetch maintenance error:", mRes.error);
-      } else if (mRes.data) {
-        setRequests(mRes.data);
-      }
-      if (rRes.data) setRooms(rRes.data);
-    } catch (err) {
-      console.error("Fetch maintenance error:", err);
+      const res = await fetch("/api/operations/maintenance", { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to fetch maintenance requests");
+      setRequests(json.requests || []);
+      setRooms(json.rooms || []);
+      setBlockedAlerts(json.blockedRoomAlerts || []);
+    } catch (err: any) {
+      setFeedback({ type: "error", text: err.message });
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const handleOpenAdd = () => {
     setSelectedMR(null);
     setRoomId(rooms.length > 0 ? String(rooms[0].room_id) : "");
     setMrDesc("");
     setPriority("Medium");
-    setRequestStatus("Open");
+    setRequestStatus("Pending");
     setRequestDate(mauritiusToday());
     setFormError("");
     setIsModalOpen(true);
   };
 
-  const handleOpenEdit = (mr: MaintenanceRequest) => {
+  const handleOpenEdit = (mr: any) => {
     setSelectedMR(mr);
     setRoomId(String(mr.room_room_id));
     setMrDesc(mr.mr_desc || "");
     setPriority(mr.priority);
-    setRequestStatus(mr.request_status);
+    const normalizedStatus =
+      mr.request_status === "Open"
+        ? "Pending"
+        : mr.request_status === "Resolved"
+        ? "Completed"
+        : mr.request_status;
+    setRequestStatus(normalizedStatus);
     setRequestDate(mr.request_date ? instantToMauritiusParts(mr.request_date).dateStr : mauritiusToday());
     setFormError("");
     setIsModalOpen(true);
   };
 
-  const handleOpenDelete = (mr: MaintenanceRequest) => {
-    setSelectedMR(mr);
-    setIsDeleteOpen(true);
-  };
-
-  const handleInlineStatusChange = async (id: number, newStatus: "Open" | "In Progress" | "Resolved") => {
+  const handleInlineUpdate = async (
+    maintenanceId: number,
+    updates: { status?: string; priority?: string }
+  ) => {
+    setFeedback(null);
     try {
-      const currentUserEmail = user?.primaryEmailAddress?.emailAddress || "admin@hbaoms.com";
-      const { error } = await supabase
-        .from("maintenance_request")
-        .update({
-          request_status: newStatus,
-          updated_by_: currentUserEmail,
-          date_updated: nowInstant(),
-        })
-        .eq("maintenance_id", id);
-
-      if (error) throw error;
+      const res = await fetch("/api/operations/maintenance", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maintenanceId, ...updates }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Update failed");
+      setFeedback({
+        type: "success",
+        text: `Ticket #${maintenanceId} updated. Room status is now "${json.roomStatus}".`,
+      });
       await fetchData();
-    } catch (err) {
-      console.error("Inline status update error:", err);
+    } catch (err: any) {
+      setFeedback({ type: "error", text: err.message });
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError("");
-
-    if (!roomId || !mrDesc) {
-      setFormError("Please select a room and enter description.");
+    if (!roomId || !mrDesc.trim()) {
+      setFormError("Please select a room and enter a description.");
       return;
     }
 
     setIsSaving(true);
-    const currentUserEmail = user?.primaryEmailAddress?.emailAddress || "admin@hbaoms.com";
-    const now = nowInstant();
-    const reqDateClean = requestDate.includes("T") ? requestDate.split("T")[0] : requestDate;
-    const reqDateInstant = startOfMauritiusDay(reqDateClean);
-
     try {
       if (selectedMR) {
-        const id = selectedMR.maintenance_id || selectedMR.mr_id;
-        const { error } = await supabase
-          .from("maintenance_request")
-          .update({
-            room_room_id: Number(roomId),
-            mr_desc: mrDesc,
+        const res = await fetch("/api/operations/maintenance", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            maintenanceId: selectedMR.maintenance_id || selectedMR.mr_id,
+            roomId: Number(roomId),
+            description: mrDesc.trim(),
             priority,
-            request_status: requestStatus,
-            request_date: reqDateInstant,
-            updated_by_: currentUserEmail,
-            date_updated: now,
-          })
-          .eq("maintenance_id", id);
-
-        if (error) throw error;
+            status: requestStatus,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Failed to update ticket");
+        setFeedback({
+          type: "success",
+          text: `Ticket updated. Room #${roomId} status is now "${json.roomStatus}".`,
+        });
       } else {
-        const { error } = await supabase.from("maintenance_request").insert([
-          {
-            room_room_id: Number(roomId),
-            mr_desc: mrDesc,
+        const res = await fetch("/api/operations/maintenance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            roomId: Number(roomId),
+            description: mrDesc.trim(),
             priority,
-            request_status: requestStatus,
-            request_date: reqDateInstant,
-            created_by: currentUserEmail,
-            date_created: now,
-            updated_by_: currentUserEmail,
-            date_updated: now,
-          },
-        ]);
-
-        if (error) throw error;
+            status: requestStatus,
+            requestDate,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Failed to create ticket");
+        setFeedback({
+          type: "success",
+          text: `Ticket created and logged under your staff account. Room #${roomId} status: "${json.roomStatus}".`,
+        });
       }
 
       await fetchData();
       setIsModalOpen(false);
     } catch (err: any) {
-      console.error("Save MR error:", err);
-      setFormError(err.message || "Failed to save maintenance request.");
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!selectedMR) return;
-    setIsSaving(true);
-    const id = selectedMR.maintenance_id || selectedMR.mr_id;
-    try {
-      const { error } = await supabase.from("maintenance_request").delete().eq("maintenance_id", id);
-      if (error) throw error;
-      await fetchData();
-      setIsDeleteOpen(false);
-    } catch (err) {
-      console.error("Delete MR error:", err);
+      setFormError(err.message || "Failed to save maintenance ticket.");
     } finally {
       setIsSaving(false);
     }
@@ -212,43 +197,59 @@ export default function MaintenancePage() {
   const getPriorityBadge = (p: string) => {
     switch (p) {
       case "Urgent":
-        return <Badge className="bg-red-600 hover:bg-red-700 text-white">Urgent</Badge>;
+        return <Badge className="bg-red-600 text-white">Urgent (Blocks Room)</Badge>;
       case "High":
-        return <Badge className="bg-orange-500 hover:bg-orange-600 text-white">High</Badge>;
+        return <Badge className="bg-orange-500 text-white">High (Blocks Room)</Badge>;
       case "Medium":
-        return <Badge className="bg-blue-500 hover:bg-blue-600 text-white">Medium</Badge>;
+        return <Badge className="bg-blue-500 text-white">Medium</Badge>;
       case "Low":
-        return <Badge className="bg-slate-400 hover:bg-slate-500 text-white">Low</Badge>;
+        return <Badge className="bg-slate-500 text-white">Low</Badge>;
       default:
         return <Badge variant="outline">{p}</Badge>;
     }
   };
 
-  const getStatusBadge = (s: string) => {
-    switch (s) {
-      case "Resolved":
-        return <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white gap-1"><CheckCircle className="h-3 w-3" /> Resolved</Badge>;
-      case "In Progress":
-        return <Badge className="bg-amber-500 hover:bg-amber-600 text-white gap-1"><Clock className="h-3 w-3" /> In Progress</Badge>;
-      case "Open":
-        return <Badge className="bg-red-500 hover:bg-red-600 text-white gap-1"><AlertTriangle className="h-3 w-3" /> Open</Badge>;
-      default:
-        return <Badge variant="outline">{s}</Badge>;
-    }
-  };
-
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
         <div>
           <h1 className="text-2xl font-bold text-navy-900">Maintenance Requests</h1>
-          <p className="text-slate-500 text-sm">Property repair tickets, urgent issues, and resolution status updates.</p>
+          <p className="text-slate-500 text-sm">
+            High and Urgent open tickets set the room to Maintenance (blocked from sale). Low and Medium do not block rooms.
+          </p>
         </div>
-        <Button onClick={handleOpenAdd} variant="gold" className="gap-2">
-          <Plus className="h-4 w-4" /> Create Ticket
-        </Button>
+        {canWrite && (
+          <Button onClick={handleOpenAdd} variant="gold" className="gap-2">
+            <Plus className="h-4 w-4" /> Create Ticket
+          </Button>
+        )}
       </div>
+
+      {blockedAlerts.length > 0 && (
+        <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-xl text-xs space-y-1">
+          <div className="font-bold flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-red-600" /> Active Guest Impact Alert
+          </div>
+          {blockedAlerts.map((a) => (
+            <div key={`${a.roomId}-${a.bookingId}`}>
+              Room #{a.roomId} is blocked in Maintenance while Guest {a.guestName} (Booking #{a.bookingId}) is {a.situation}. Reception is alerted.
+            </div>
+          ))}
+        </div>
+      )}
+
+      {feedback && (
+        <div
+          className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+            feedback.type === "success"
+              ? "bg-emerald-50 border border-emerald-200 text-emerald-800"
+              : "bg-red-50 border border-red-200 text-red-700"
+          }`}
+        >
+          {feedback.type === "success" ? <CheckCircle className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+          <span>{feedback.text}</span>
+        </div>
+      )}
 
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
@@ -263,103 +264,129 @@ export default function MaintenancePage() {
       {loading ? (
         <SkeletonTable rows={5} columns={7} />
       ) : (
-        <>
-          <div className="hidden md:block bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-slate-600 uppercase text-[11px] font-bold border-b border-slate-200">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 text-slate-600 uppercase text-[11px] font-bold border-b border-slate-200">
+              <tr>
+                <th className="px-4 py-3">ID</th>
+                <th className="px-4 py-3">Room & Description</th>
+                <th className="px-4 py-3">Priority</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Room Availability</th>
+                <th className="px-4 py-3">Logged By (Staff)</th>
+                {canWrite && <th className="px-4 py-3 text-right">Edit</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {filtered.length === 0 ? (
                 <tr>
-                  <th className="px-4 py-3">ID</th>
-                  <th className="px-4 py-3">Room & Description</th>
-                  <th className="px-4 py-3">Priority</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Request Date</th>
-                  <th className="px-4 py-3">Logged By</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                    No maintenance tickets found.
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200">
-                {filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
-                      No maintenance tickets found.
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((r) => {
-                    const ticketId = Number(r.maintenance_id || r.mr_id);
-                    return (
-                      <tr key={ticketId} className="hover:bg-slate-50/50">
-                        <td className="px-4 py-3 font-mono font-bold text-navy-900">#{ticketId}</td>
-                        <td className="px-4 py-3">
-                          <div className="font-semibold text-slate-800">
-                            Room #{r.room_room_id} {r.room?.room_desc ? `(${r.room.room_desc})` : ""}
-                          </div>
-                          <div className="text-xs text-slate-500 truncate max-w-xs">{r.mr_desc}</div>
-                        </td>
-                        <td className="px-4 py-3">{getPriorityBadge(r.priority)}</td>
-                        <td className="px-4 py-3">
+              ) : (
+                filtered.map((r) => {
+                  const ticketId = Number(r.maintenance_id || r.mr_id);
+                  const currentStatus =
+                    r.request_status === "Open"
+                      ? "Pending"
+                      : r.request_status === "Resolved"
+                      ? "Completed"
+                      : r.request_status;
+                  const staffLabel = r.staff
+                    ? `${r.staff.staff_fname} ${r.staff.staff_lname}`
+                    : r.created_by || "System";
+
+                  return (
+                    <tr key={ticketId} className="hover:bg-slate-50/50">
+                      <td className="px-4 py-3 font-mono font-bold text-navy-900">#{ticketId}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-slate-800">
+                          Room #{r.room_room_id} {r.room?.room_desc ? `(${r.room.room_desc})` : ""}
+                        </div>
+                        <div className="text-xs text-slate-500 max-w-xs">{r.mr_desc}</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">{formatDate(r.request_date)}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {canWrite ? (
                           <Select
-                            value={r.request_status}
-                            onValueChange={(val: any) => handleInlineStatusChange(ticketId, val)}
+                            value={r.priority}
+                            onValueChange={(val) => handleInlineUpdate(ticketId, { priority: val })}
                           >
-                            <SelectTrigger className="h-8 w-36 border-none p-0 bg-transparent">
-                              <SelectValue>{getStatusBadge(r.request_status)}</SelectValue>
+                            <SelectTrigger className="h-8 w-44 text-xs">
+                              <SelectValue>{getPriorityBadge(r.priority)}</SelectValue>
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="Open">Open</SelectItem>
-                              <SelectItem value="In Progress">In Progress</SelectItem>
-                              <SelectItem value="Resolved">Resolved</SelectItem>
+                              <SelectItem value="Low">Low (Does Not Block)</SelectItem>
+                              <SelectItem value="Medium">Medium (Does Not Block)</SelectItem>
+                              <SelectItem value="High">High (Blocks Room)</SelectItem>
+                              <SelectItem value="Urgent">Urgent (Blocks Room)</SelectItem>
                             </SelectContent>
                           </Select>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-slate-500">{formatDate(r.request_date)}</td>
-                        <td className="px-4 py-3 text-xs text-slate-500">{r.created_by || "System"}</td>
-                        <td className="px-4 py-3 text-right space-x-1">
+                        ) : (
+                          getPriorityBadge(r.priority)
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {canWrite ? (
+                          <Select
+                            value={currentStatus}
+                            onValueChange={(val) => handleInlineUpdate(ticketId, { status: val })}
+                          >
+                            <SelectTrigger className="h-8 w-36 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Pending">Pending</SelectItem>
+                              <SelectItem value="In Progress">In Progress</SelectItem>
+                              <SelectItem value="Completed">Completed</SelectItem>
+                              <SelectItem value="Cancelled">Cancelled</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Badge variant="outline">{currentStatus}</Badge>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge
+                          variant={r.room?.room_status === "Maintenance" ? "destructive" : "success"}
+                          className="text-[11px]"
+                        >
+                          {r.room?.room_status || "Available"}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-600">
+                        <div>{staffLabel}</div>
+                        {r.staff?.is_active === "N" && (
+                          <Badge variant="outline" className="text-[10px] text-slate-400 mt-0.5">
+                            Inactive Staff
+                          </Badge>
+                        )}
+                      </td>
+                      {canWrite && (
+                        <td className="px-4 py-3 text-right">
                           <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(r)}>
                             <Edit className="h-4 w-4 text-slate-600" />
                           </Button>
-                          <Button variant="ghost" size="sm" onClick={() => handleOpenDelete(r)}>
-                            <Trash2 className="h-4 w-4 text-red-600" />
-                          </Button>
                         </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="md:hidden space-y-4">
-            {filtered.map((r) => {
-              const ticketId = Number(r.maintenance_id || r.mr_id);
-              return (
-                <div key={ticketId} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="font-mono font-bold text-xs text-gold-600">Ticket #{ticketId}</span>
-                    {getPriorityBadge(r.priority)}
-                  </div>
-                  <div className="font-bold text-navy-900">Room #{r.room_room_id}</div>
-                  <p className="text-xs text-slate-600">{r.mr_desc}</p>
-                  <div className="pt-2 border-t border-slate-100 flex justify-between items-center">
-                    {getStatusBadge(r.request_status)}
-                    <div className="flex gap-1">
-                      <Button variant="outline" size="sm" onClick={() => handleOpenEdit(r)}>Edit</Button>
-                      <Button variant="destructive" size="sm" onClick={() => handleOpenDelete(r)}>Delete</Button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
+                      )}
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {/* Modal */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent className="sm:max-w-md w-full">
           <DialogHeader>
-            <DialogTitle>{selectedMR ? "Edit Maintenance Ticket" : "Log Maintenance Request"}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Wrench className="h-4 w-4 text-gold-500" />
+              {selectedMR ? "Edit Maintenance Ticket" : "Create Maintenance Ticket"}
+            </DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
             {formError && <p className="text-xs font-semibold text-red-600 bg-red-50 p-2 rounded">{formError}</p>}
@@ -382,7 +409,7 @@ export default function MaintenancePage() {
               <Label>Description of Issue *</Label>
               <Textarea
                 rows={3}
-                placeholder="e.g. AC unit leaking in bedroom..."
+                placeholder="e.g. AC compressor leaking water..."
                 value={mrDesc}
                 onChange={(e) => setMrDesc(e.target.value)}
                 required
@@ -395,10 +422,10 @@ export default function MaintenancePage() {
                 <Select value={priority} onValueChange={(val: any) => setPriority(val)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Low">Low</SelectItem>
-                    <SelectItem value="Medium">Medium</SelectItem>
-                    <SelectItem value="High">High</SelectItem>
-                    <SelectItem value="Urgent">Urgent</SelectItem>
+                    <SelectItem value="Low">Low (Non-blocking)</SelectItem>
+                    <SelectItem value="Medium">Medium (Non-blocking)</SelectItem>
+                    <SelectItem value="High">High (Blocks Room)</SelectItem>
+                    <SelectItem value="Urgent">Urgent (Blocks Room)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -408,44 +435,33 @@ export default function MaintenancePage() {
                 <Select value={requestStatus} onValueChange={(val: any) => setRequestStatus(val)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Open">Open</SelectItem>
+                    <SelectItem value="Pending">Pending</SelectItem>
                     <SelectItem value="In Progress">In Progress</SelectItem>
-                    <SelectItem value="Resolved">Resolved</SelectItem>
+                    <SelectItem value="Completed">Completed</SelectItem>
+                    <SelectItem value="Cancelled">Cancelled</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label>Request Date *</Label>
-              <Input type="date" value={requestDate} onChange={(e) => setRequestDate(e.target.value)} required />
+            {!selectedMR && (
+              <div className="space-y-2">
+                <Label>Request Date *</Label>
+                <Input type="date" value={requestDate} onChange={(e) => setRequestDate(e.target.value)} required />
+              </div>
+            )}
+
+            <div className="p-2.5 rounded bg-slate-50 border text-[11px] text-slate-500">
+              Staff member ID and audit trail are recorded automatically from your active session on the server.
             </div>
 
-            <DialogFooter className="pt-4">
+            <DialogFooter className="pt-2">
               <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>Cancel</Button>
               <Button type="submit" variant="gold" disabled={isSaving}>
-                {isSaving ? "Saving..." : selectedMR ? "Update Ticket" : "Save Request"}
+                {isSaving ? "Saving..." : selectedMR ? "Update Ticket" : "Save Ticket"}
               </Button>
             </DialogFooter>
           </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Dialog */}
-      <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Confirm Delete Ticket</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-slate-600">
-            Are you sure you want to delete maintenance ticket <strong>#{selectedMR?.maintenance_id || selectedMR?.mr_id}</strong>?
-          </p>
-          <DialogFooter className="pt-4">
-            <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={isSaving}>
-              {isSaving ? "Deleting..." : "Delete"}
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

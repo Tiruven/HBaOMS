@@ -21,45 +21,53 @@ export default function CustomerLayout({ children }: { children: React.ReactNode
       const email = user.primaryEmailAddress.emailAddress;
 
       try {
-        // 1. Check if user is staff -> if so, automatically redirect to admin dashboard
-        const { data: staffData } = await supabase
-          .from("staff")
-          .select("staff_id")
-          .ilike("email", email.trim())
-          .single();
-
-        if (staffData) {
-          window.location.href = "/admin/dashboard";
-          return;
+        // 1. Check if user is active staff -> if so, automatically redirect to admin dashboard
+        const staffRes = await fetch("/api/staff?me=1", { cache: "no-store" });
+        if (staffRes.ok) {
+          const staffJson = await staffRes.json();
+          if (staffJson?.staff && staffJson.staff.is_active === "Y") {
+            window.location.href = "/admin/dashboard";
+            return;
+          }
         }
 
         // 2. Ensure customer record exists in Supabase customer table
         const { data: custData } = await supabase
           .from("customer")
-          .select("cust_id")
+          .select("cust_id, clerk_user_id")
           .ilike("email", email.trim())
-          .single();
+          .maybeSingle();
 
         if (!custData) {
           const fname = user.firstName || "Guest";
           const lname = user.lastName || "Customer";
 
-          await supabase.from("customer").insert([
-            {
-              cust_fname: fname.substring(0, 100),
-              cust_lname: lname.substring(0, 100),
-              email: email,
-              password_hash: "CLERK_AUTH",
-              town: "Grand Baie",
-              city: "Grand Baie",
-              gender: "M",
-              contact_info: user.primaryPhoneNumber?.phoneNumber || "N/A",
-              nationality: "Mauritian",
-              country: "Mauritius",
-              created_by: "Clerk AutoSync",
-              date_created: nowInstant(),
-            },
-          ]);
+          const insertPayload: Record<string, any> = {
+            cust_fname: fname.substring(0, 100),
+            cust_lname: lname.substring(0, 100),
+            email: email,
+            clerk_user_id: user.id,
+            password_hash: "CLERK_AUTH",
+            town: "Grand Baie",
+            city: "Grand Baie",
+            gender: "M",
+            contact_info: user.primaryPhoneNumber?.phoneNumber || "N/A",
+            nationality: "Mauritian",
+            country: "Mauritius",
+            created_by: "Clerk AutoSync",
+            date_created: nowInstant(),
+          };
+
+          const { error: custInsertErr } = await supabase.from("customer").insert([insertPayload]);
+          if (custInsertErr && custInsertErr.message?.includes("clerk_user_id")) {
+            delete insertPayload.clerk_user_id;
+            await supabase.from("customer").insert([insertPayload]);
+          }
+        } else if (!custData.clerk_user_id) {
+          await supabase
+            .from("customer")
+            .update({ clerk_user_id: user.id })
+            .eq("cust_id", custData.cust_id);
         }
       } catch (err) {
         console.error("Error in customer auto-sync:", err);

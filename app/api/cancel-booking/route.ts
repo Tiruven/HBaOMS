@@ -3,6 +3,8 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { auth, currentUser } from "@clerk/nextjs/server";
+import { requireStaffRole } from "@/lib/staffAuth";
 import {
   computeRoomRefund,
   computeScheduledServiceRefund,
@@ -46,6 +48,43 @@ export async function POST(req: Request) {
 
     if (bErr || !booking) {
       return NextResponse.json({ error: "Booking not found" }, { status: 404 });
+    }
+
+    // 1b. Server-side permission & audit verification:
+    // Allow active Admin, active Receptionist (guest-requested cancellations only),
+    // or the owning customer of this booking.
+    const { userId } = auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized. Please sign in." }, { status: 401 });
+    }
+
+    const staffCheck = await requireStaffRole(["Admin", "Receptionist"]);
+    let effectiveHotelInitiated = false;
+    let verifiedActorEmail = "";
+
+    if (staffCheck.authorized) {
+      verifiedActorEmail = staffCheck.staff.email;
+      // Receptionist can only trigger guest-requested cancellations under v5 policy
+      effectiveHotelInitiated =
+        staffCheck.staff.role === "Admin" ? Boolean(isHotelInitiated) : false;
+    } else {
+      const clerkUser = await currentUser();
+      const clerkEmail = clerkUser?.primaryEmailAddress?.emailAddress?.trim().toLowerCase() || "";
+      const ownerEmail = (booking.customer?.email || "").trim().toLowerCase();
+      const matchesClerkId = Boolean(
+        booking.customer?.clerk_user_id && booking.customer.clerk_user_id === userId
+      );
+      const matchesEmail = Boolean(clerkEmail && ownerEmail && clerkEmail === ownerEmail);
+
+      if (!matchesClerkId && !matchesEmail) {
+        return NextResponse.json(
+          { error: "Forbidden. You do not have permission to cancel this booking." },
+          { status: 403 }
+        );
+      }
+
+      effectiveHotelInitiated = false;
+      verifiedActorEmail = clerkEmail || ownerEmail;
     }
 
     if (booking.booking_status === "Cancelled") {
@@ -93,7 +132,7 @@ export async function POST(req: Request) {
     const items: (ItemRefundCalculation & { name: string; paymentId?: number; stripeSessionId?: string | null })[] = [];
 
     // Room calculation
-    const roomCalc = computeRoomRefund(roomPaid, checkInDate, isHotelInitiated);
+    const roomCalc = computeRoomRefund(roomPaid, checkInDate, effectiveHotelInitiated);
     items.push({
       ...roomCalc,
       name: `Room Reservation (Booking #${idNum})`,
@@ -105,8 +144,8 @@ export async function POST(req: Request) {
     for (const sb of serviceBookings || []) {
       const isScheduled = sb.service?.service_type === "scheduled";
       const sbCalc = isScheduled
-        ? computeScheduledServiceRefund(sb.sb_id, Number(sb.total_amount) || 0, sb.time_in, sb.sb_status, isHotelInitiated)
-        : computeOnDemandServiceRefund(sb.sb_id, Number(sb.total_amount) || 0, sb.sb_status, isHotelInitiated);
+        ? computeScheduledServiceRefund(sb.sb_id, Number(sb.total_amount) || 0, sb.time_in, sb.sb_status, effectiveHotelInitiated)
+        : computeOnDemandServiceRefund(sb.sb_id, Number(sb.total_amount) || 0, sb.sb_status, effectiveHotelInitiated);
 
       const linkedPayment = allPayments.find((p) => (p.payment_id || p.pay_id) === sb.payment_id) || mainPayment;
       items.push({
@@ -125,7 +164,7 @@ export async function POST(req: Request) {
         Number(tb.total_amount) || 0,
         departureTime,
         tb.tb_status || "Pending",
-        isHotelInitiated
+        effectiveHotelInitiated
       );
 
       const linkedPayment = allPayments.find((p) => (p.payment_id || p.pay_id) === tb.payment_id) || mainPayment;
@@ -155,7 +194,7 @@ export async function POST(req: Request) {
 
     // Execution: Process partial refunds item by item with Stripe and DB
     const now = nowInstant();
-    const emailToUse = userEmail || booking.customer?.email || "customer@hbaoms.com";
+    const emailToUse = verifiedActorEmail || userEmail || booking.customer?.email || "customer@hbaoms.com";
 
     for (const item of items) {
       if (item.refundAmount > 0 && item.paymentId) {
@@ -181,7 +220,7 @@ export async function POST(req: Request) {
       .from("booking")
       .update({
         booking_status: "Cancelled",
-        cancellation_reason: reason || (isHotelInitiated ? "Hotel-initiated cancellation" : "Cancelled by guest via client portal"),
+        cancellation_reason: reason || (effectiveHotelInitiated ? "Hotel-initiated cancellation" : "Cancelled per guest request"),
         cancelled_at: now,
         updated_by_: emailToUse,
         date_updated: now,

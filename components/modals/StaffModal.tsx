@@ -21,36 +21,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Staff, StaffRole } from "@/lib/types";
+import { Staff, StaffRole, ALL_STAFF_ROLES, normalizeStaffRole } from "@/lib/types";
 import { AuditFieldsView } from "@/components/shared/AuditFields";
 import { Loader2 } from "lucide-react";
 
-const roles: StaffRole[] = [
-  "Admin",
-  "Receptnst",
-  "Housekpr",
-  "Technician",
-  "Plumber",
-  "Electric",
-  "Chef",
-];
+const roles: StaffRole[] = ALL_STAFF_ROLES;
 
 const staffSchema = z.object({
   staff_fname: z.string().min(1, "First name is required").max(100, "Max 100 characters"),
   staff_lname: z.string().min(1, "Last name is required").max(100, "Max 100 characters"),
   role: z.enum([
     "Admin",
-    "Receptnst",
-    "Housekpr",
-    "Technician",
-    "Plumber",
-    "Electric",
-    "Chef",
+    "Receptionist",
+    "Service Supervisor",
+    "Activities Supervisor",
+    "Housekeeping Supervisor",
+    "Maintenance Supervisor",
   ] as const, {
     required_error: "Please select a staff role",
   }),
   email: z.string().email("Invalid email address").max(254, "Max 254 characters"),
-  contact_info: z.string().min(7, "Min 7 characters").max(30, "Max 30 characters"),
+  contact_info: z.string().min(4, "Min 4 characters").max(30, "Max 30 characters"),
   is_active: z.enum(["Y", "N"]),
 });
 
@@ -82,7 +73,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
     defaultValues: {
       staff_fname: "",
       staff_lname: "",
-      role: "Receptnst",
+      role: "Receptionist",
       email: "",
       contact_info: "",
       is_active: "Y",
@@ -94,7 +85,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
       reset({
         staff_fname: initialData.staff_fname,
         staff_lname: initialData.staff_lname,
-        role: initialData.role,
+        role: normalizeStaffRole(initialData.role),
         email: initialData.email,
         contact_info: initialData.contact_info,
         is_active: initialData.is_active,
@@ -103,7 +94,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
       reset({
         staff_fname: "",
         staff_lname: "",
-        role: "Receptnst",
+        role: "Receptionist",
         email: "",
         contact_info: "",
         is_active: "Y",

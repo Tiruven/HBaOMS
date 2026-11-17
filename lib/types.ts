@@ -14,6 +14,7 @@ export interface RoomType extends AuditFields {
   size: number;
   max_adults?: number;
   max_children?: number;
+  cleaning_minutes?: number;
   image_path?: string | null;
 }
 
@@ -58,12 +59,48 @@ export interface Tour extends AuditFields {
 
 export type StaffRole =
   | "Admin"
-  | "Receptnst"
-  | "Housekpr"
-  | "Technician"
-  | "Plumber"
-  | "Electric"
-  | "Chef";
+  | "Receptionist"
+  | "Service Supervisor"
+  | "Activities Supervisor"
+  | "Housekeeping Supervisor"
+  | "Maintenance Supervisor";
+
+export const ALL_STAFF_ROLES: StaffRole[] = [
+  "Admin",
+  "Receptionist",
+  "Service Supervisor",
+  "Activities Supervisor",
+  "Housekeeping Supervisor",
+  "Maintenance Supervisor",
+];
+
+/**
+ * Normalizes legacy 10-char DB role abbreviations or new role names into StaffRole.
+ */
+export function normalizeStaffRole(rawRole?: string | null): StaffRole {
+  switch ((rawRole || "").trim()) {
+    case "Admin":
+      return "Admin";
+    case "Receptionist":
+    case "Receptnst":
+      return "Receptionist";
+    case "Service Supervisor":
+    case "Chef":
+      return "Service Supervisor";
+    case "Activities Supervisor":
+      return "Activities Supervisor";
+    case "Housekeeping Supervisor":
+    case "Housekpr":
+      return "Housekeeping Supervisor";
+    case "Maintenance Supervisor":
+    case "Technician":
+    case "Plumber":
+    case "Electric":
+      return "Maintenance Supervisor";
+    default:
+      return "Service Supervisor";
+  }
+}
 
 export interface Staff extends AuditFields {
   staff_id: number;
@@ -71,6 +108,7 @@ export interface Staff extends AuditFields {
   staff_lname: string;
   role: StaffRole;
   email: string;
+  clerk_user_id?: string | null;
   password_hash?: string;
   contact_info: string;
   is_active: "Y" | "N";
@@ -84,6 +122,7 @@ export interface Customer extends AuditFields {
   city?: string | null;
   gender?: "M" | "F" | null;
   email: string;
+  clerk_user_id?: string | null;
   contact_info: string;
   passport_number?: string | null;
   country?: string | null;
@@ -167,6 +206,22 @@ export interface MaintenanceRequest extends AuditFields {
   priority: "Low" | "Medium" | "High" | "Urgent";
   request_status: "Pending" | "In Progress" | "Completed" | "Cancelled" | "Open" | "Resolved";
   room_room_id: number;
+  staff_staff_id?: number | null;
+  room?: Room;
+  staff?: Staff;
+}
+
+export interface HousekeepingRequest {
+  hk_req_id: number;
+  room_room_id: number;
+  request_type: "Special cleaning" | "Excessive mess" | "Extra cleaning";
+  description?: string | null;
+  request_status: "Pending" | "In Progress" | "Completed" | "Cancelled";
+  created_at: string;
+  completed_at?: string | null;
+  created_by?: string | null;
+  updated_by_?: string | null;
+  date_updated?: string | null;
   room?: Room;
 }
 

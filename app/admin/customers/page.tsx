@@ -3,10 +3,12 @@
 
 import React, { useEffect, useState } from "react";
 import { useUser } from "@clerk/nextjs";
+import { useStaffRole } from "@/lib/roleContext";
 import { supabase } from "@/lib/supabaseClient";
 import { Customer } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 import { SkeletonTable } from "@/components/shared/SkeletonTable";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,6 +30,9 @@ import { Plus, Search, Trash2, Edit, UserCheck } from "lucide-react";
 
 export default function CustomersPage() {
   const { user } = useUser();
+  const { role } = useStaffRole();
+  const isAdmin = role === "Admin";
+
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>("");
@@ -51,11 +56,20 @@ export default function CustomersPage() {
 
   useEffect(() => {
     fetchCustomers();
-  }, []);
+  }, [isAdmin]);
 
   const fetchCustomers = async () => {
     setLoading(true);
     try {
+      if (!isAdmin) {
+        const res = await fetch("/api/operations/reception");
+        if (res.ok) {
+          const json = await res.json();
+          setCustomers(json.customers || []);
+        }
+        return;
+      }
+
       const { data, error } = await supabase
         .from("customer")
         .select("*")
@@ -180,12 +194,25 @@ export default function CustomersPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold text-navy-900">Customer Directory</h1>
-          <p className="text-slate-500 text-sm">Registered guest profiles, contact details, and passport information.</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-bold text-navy-900">Customer Directory</h1>
+            {!isAdmin && (
+              <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-200 text-xs">
+                View-Only (Passport Masked)
+              </Badge>
+            )}
+          </div>
+          <p className="text-slate-500 text-sm">
+            {isAdmin
+              ? "Registered guest profiles, contact details, and passport information."
+              : "View registered guest profiles with masked passport numbers for front-desk lookup."}
+          </p>
         </div>
-        <Button onClick={handleOpenAdd} variant="gold" className="gap-2">
-          <Plus className="h-4 w-4" /> Add Customer
-        </Button>
+        {isAdmin && (
+          <Button onClick={handleOpenAdd} variant="gold" className="gap-2">
+            <Plus className="h-4 w-4" /> Add Customer
+          </Button>
+        )}
       </div>
 
       {/* Filter */}
@@ -237,12 +264,18 @@ export default function CustomersPage() {
                       <td className="px-4 py-3 text-slate-600">{c.country || "-"}</td>
                       <td className="px-4 py-3 text-xs text-slate-500">{formatDate(c.date_created)}</td>
                       <td className="px-4 py-3 text-right space-x-1">
-                        <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(c)}>
-                          <Edit className="h-4 w-4 text-slate-600" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleOpenDelete(c)}>
-                          <Trash2 className="h-4 w-4 text-red-600" />
-                        </Button>
+                        {isAdmin ? (
+                          <>
+                            <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(c)}>
+                              <Edit className="h-4 w-4 text-slate-600" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleOpenDelete(c)}>
+                              <Trash2 className="h-4 w-4 text-red-600" />
+                            </Button>
+                          </>
+                        ) : (
+                          <span className="text-xs text-slate-400">Read-only</span>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -263,10 +296,12 @@ export default function CustomersPage() {
                   <div><strong>Nationality:</strong> {c.nationality || "-"}</div>
                   <div><strong>Passport:</strong> {c.passport_number || "-"}</div>
                 </div>
-                <div className="pt-2 border-t border-slate-100 flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={() => handleOpenEdit(c)}>Edit</Button>
-                  <Button variant="destructive" size="sm" onClick={() => handleOpenDelete(c)}>Delete</Button>
-                </div>
+                {isAdmin && (
+                  <div className="pt-2 border-t border-slate-100 flex justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => handleOpenEdit(c)}>Edit</Button>
+                    <Button variant="destructive" size="sm" onClick={() => handleOpenDelete(c)}>Delete</Button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

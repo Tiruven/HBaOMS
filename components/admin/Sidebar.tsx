@@ -56,10 +56,11 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    group: "Rooms & Amenities",
+    group: "Rooms & Housekeeping",
     items: [
       { title: "Room Types", href: "/admin/room-types", icon: Hotel },
-      { title: "Rooms", href: "/admin/rooms", icon: BedDouble },
+      { title: "Rooms Overview", href: "/admin/rooms", icon: BedDouble },
+      { title: "Housekeeping", href: "/admin/housekeeping", icon: Sparkles },
       { title: "Room Features", href: "/admin/features", icon: Sparkles },
       { title: "Room Amenities", href: "/admin/room-features", icon: Layers },
     ],

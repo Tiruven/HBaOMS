@@ -4,6 +4,12 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
+import { useStaffRole } from "@/lib/roleContext";
+import { ReceptionistDashboard } from "@/components/admin/dashboards/ReceptionistDashboard";
+import { ServiceSupervisorDashboard } from "@/components/admin/dashboards/ServiceSupervisorDashboard";
+import { ActivitiesSupervisorDashboard } from "@/components/admin/dashboards/ActivitiesSupervisorDashboard";
+import { HousekeepingSupervisorDashboard } from "@/components/admin/dashboards/HousekeepingSupervisorDashboard";
+import { MaintenanceSupervisorDashboard } from "@/components/admin/dashboards/MaintenanceSupervisorDashboard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import { nowInstant, instantToMauritiusParts } from "@/lib/time";
@@ -57,6 +63,7 @@ interface DayHeatmap {
 }
 
 export default function AdminDashboardPage() {
+  const { role, isLoadingRole } = useStaffRole();
   const [stats, setStats] = useState<DashboardStats>({
     totalRooms: 0,
     availableRooms: 0,
@@ -71,9 +78,11 @@ export default function AdminDashboardPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   useEffect(() => {
+    if (isLoadingRole || role !== "Admin") return;
+
     fetchDashboardAnalytics();
 
-    // Lightweight Realtime subscription for live dashboard updates
+    // Lightweight Realtime subscription for live Admin dashboard updates
     const channel = supabase
       .channel("dashboard-realtime-updates")
       .on(
@@ -96,7 +105,27 @@ export default function AdminDashboardPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [role, isLoadingRole]);
+
+  if (isLoadingRole) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-32 w-full rounded-xl" />
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Skeleton className="h-24 w-full rounded-xl" />
+          <Skeleton className="h-24 w-full rounded-xl" />
+          <Skeleton className="h-24 w-full rounded-xl" />
+          <Skeleton className="h-24 w-full rounded-xl" />
+        </div>
+      </div>
+    );
+  }
+
+  if (role === "Receptionist") return <ReceptionistDashboard />;
+  if (role === "Service Supervisor") return <ServiceSupervisorDashboard />;
+  if (role === "Activities Supervisor") return <ActivitiesSupervisorDashboard />;
+  if (role === "Housekeeping Supervisor") return <HousekeepingSupervisorDashboard />;
+  if (role === "Maintenance Supervisor") return <MaintenanceSupervisorDashboard />;
 
   const fetchDashboardAnalytics = async () => {
     setIsLoading(true);
@@ -477,7 +506,7 @@ export default function AdminDashboardPage() {
       </div>
 
       {/* Quick Navigation Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4 pt-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-4 pt-4">
         <Link href="/admin/bookings" className="p-4 rounded-xl bg-white border border-slate-200 hover:border-gold-500 transition-all text-center group shadow-sm">
           <CalendarCheck className="h-6 w-6 text-gold-500 mx-auto mb-2 group-hover:scale-110 transition-transform" />
           <span className="text-xs font-bold text-navy-900 block">Bookings</span>
@@ -485,6 +514,10 @@ export default function AdminDashboardPage() {
         <Link href="/admin/check-in-out" className="p-4 rounded-xl bg-white border border-slate-200 hover:border-gold-500 transition-all text-center group shadow-sm">
           <BedDouble className="h-6 w-6 text-gold-500 mx-auto mb-2 group-hover:scale-110 transition-transform" />
           <span className="text-xs font-bold text-navy-900 block">Check In/Out</span>
+        </Link>
+        <Link href="/admin/housekeeping" className="p-4 rounded-xl bg-white border border-slate-200 hover:border-gold-500 transition-all text-center group shadow-sm">
+          <Sparkles className="h-6 w-6 text-gold-500 mx-auto mb-2 group-hover:scale-110 transition-transform" />
+          <span className="text-xs font-bold text-navy-900 block">Housekeeping</span>
         </Link>
         <Link href="/admin/services" className="p-4 rounded-xl bg-white border border-slate-200 hover:border-gold-500 transition-all text-center group shadow-sm">
           <ConciergeBell className="h-6 w-6 text-gold-500 mx-auto mb-2 group-hover:scale-110 transition-transform" />

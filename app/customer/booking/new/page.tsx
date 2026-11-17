@@ -9,6 +9,7 @@ import { Room, PricingRule } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getImageUrl } from "@/lib/imageUtils";
 import { calculateVat } from "@/lib/pricing";
+import { getRoomReadiness, RoomReadinessMaintInput } from "@/lib/roomReadiness";
 import { StepIndicator } from "@/components/customer/StepIndicator";
 import { PricingBadge } from "@/components/customer/PricingBadge";
 import { Button } from "@/components/ui/button";
@@ -136,7 +137,7 @@ export default function BookingWizardPage() {
           .from("check_in_out")
           .select("check_in_date, check_out_date, booking!inner(booking_status)")
           .eq("room_room_id", selectedRoom.room_id)
-          .eq("booking.booking_status", "Confirmed")
+          .in("booking.booking_status", ["Confirmed", "Checked In"])
           .gte("check_out_date", todayStr);
 
         if (data) {
@@ -160,18 +161,47 @@ export default function BookingWizardPage() {
     async function loadCatalog() {
       setLoadingData(true);
       try {
-        const [rRes, prRes] = await Promise.all([
-          supabase.from("room").select("*, room_type(*), room_feature(feature(*))").eq("room_status", "Available"),
+        const [rRes, prRes, mrRes] = await Promise.all([
+          supabase.from("room").select("*, room_type(*), room_feature(feature(*))"),
           supabase.from("pricing_rule").select("*"),
+          supabase
+            .from("maintenance_request")
+            .select("mr_id, room_room_id, priority, request_status, mr_desc")
+            .in("request_status", ["Pending", "In Progress", "Open"]),
         ]);
 
         if (rRes.data) {
-          setRooms(rRes.data);
+          const allMaint = mrRes.data || [];
+          const nowDate = new Date();
+          const availableRooms = (rRes.data as Room[]).filter((r) => {
+            const roomMaint: RoomReadinessMaintInput[] = allMaint
+              .filter((m: any) => m.room_room_id === r.room_id)
+              .map((m: any) => ({
+                maintenanceId: m.mr_id,
+                priority: m.priority,
+                status: m.request_status,
+                description: m.mr_desc,
+              }));
+            const readiness = getRoomReadiness({
+              roomId: r.room_id,
+              storedRoomStatus: r.room_status === "Maintenance" ? "Maintenance" : "Available",
+              cleaningMinutes: Number(r.room_type?.cleaning_minutes) || 45,
+              now: nowDate,
+              activeOrLastStay: null,
+              openHousekeepingRequests: [],
+              openMaintenanceTickets: roomMaint,
+            });
+            // Routine post-checkout Cleaning never blocks the booking wizard;
+            // only Maintenance (stored or High/Urgent ticket) and date overlap block.
+            return !readiness.isBlockedForWizard;
+          });
+
+          setRooms(availableRooms);
           if (preselectedRoomId) {
-            const found = rRes.data.find((r) => r.room_id === Number(preselectedRoomId));
+            const found = availableRooms.find((r) => r.room_id === Number(preselectedRoomId));
             if (found) setSelectedRoom(found);
-          } else if (rRes.data.length > 0) {
-            setSelectedRoom(rRes.data[0]);
+          } else if (availableRooms.length > 0) {
+            setSelectedRoom(availableRooms[0]);
           }
         }
         if (prRes.data) setPricingRules(prRes.data);

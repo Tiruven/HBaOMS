@@ -3,6 +3,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useUser } from "@clerk/nextjs";
+import { useStaffRole } from "@/lib/roleContext";
 import { supabase } from "@/lib/supabaseClient";
 import { CheckInOut, Room, Booking } from "@/lib/types";
 import { formatDate, cn } from "@/lib/utils";
@@ -37,13 +38,26 @@ import { Plus, Search, Trash2, CalendarCheck, AlertTriangle, RefreshCw, Bot, Che
 
 export default function CheckInOutPage() {
   const { user } = useUser();
+  const { role } = useStaffRole();
+  const isAdmin = role === "Admin";
+
   const [stays, setStays] = useState<CheckInOut[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isSyncingAutoCheckout, setIsSyncingAutoCheckout] = useState<boolean>(false);
   const [autoCheckoutNotice, setAutoCheckoutNotice] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>("");
+
+  // Check-in readiness warning modal
+  const [pendingCheckInStay, setPendingCheckInStay] = useState<CheckInOut | null>(null);
+  const [checkInWarning, setCheckInWarning] = useState<{
+    derivedStatus: string;
+    warnings: string[];
+    note: string;
+  } | null>(null);
+  const [isActionBusy, setIsActionBusy] = useState<boolean>(false);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -61,7 +75,7 @@ export default function CheckInOutPage() {
   useEffect(() => {
     // Run auto checkout on mount to ensure expired stays are handled immediately
     initData();
-  }, []);
+  }, [isAdmin]);
 
   const initData = async () => {
     try {
@@ -96,15 +110,20 @@ export default function CheckInOutPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [sRes, rRes, bRes] = await Promise.all([
-        supabase.from("check_in_out").select("*, room(*), booking(*, customer(*))"),
-        supabase.from("room").select("*").order("room_id", { ascending: true }),
-        supabase.from("booking").select("*, customer(*)").order("booking_id", { ascending: false }),
-      ]);
+      const recRes = await fetch("/api/operations/reception");
+      if (recRes.ok) {
+        const recJson = await recRes.json();
+        setStays(recJson.stays || []);
+      }
 
-      if (sRes.data) setStays(sRes.data);
-      if (rRes.data) setRooms(rRes.data);
-      if (bRes.data) setBookings(bRes.data);
+      if (isAdmin) {
+        const [rRes, bRes] = await Promise.all([
+          supabase.from("room").select("*").order("room_id", { ascending: true }),
+          supabase.from("booking").select("*, customer(*)").order("booking_id", { ascending: false }),
+        ]);
+        if (rRes.data) setRooms(rRes.data);
+        if (bRes.data) setBookings(bRes.data);
+      }
     } catch (err) {
       console.error("Fetch error:", err);
     } finally {
@@ -246,65 +265,106 @@ export default function CheckInOutPage() {
     }
   };
 
-  const handleCheckIn = async (stay: CheckInOut) => {
+  const handleCheckIn = async (stay: CheckInOut, confirmNotReady = false) => {
+    setIsActionBusy(true);
+    setActionNotice(null);
     try {
-      const now = nowInstant();
-      const { error } = await supabase
-        .from("check_in_out")
-        .update({
-          actual_check_in: now,
-          status: "Checked In"
-        })
-        .eq("room_room_id", stay.room_room_id)
-        .eq("booking_booking_id", stay.booking_booking_id);
+      const res = await fetch("/api/operations/reception", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "check_in",
+          bookingId: stay.booking_booking_id,
+          roomId: stay.room_room_id,
+          confirmNotReady,
+        }),
+      });
+      const json = await res.json();
 
-      if (error) {
-        if (error.message?.includes("actual_check_in")) {
-          const { error: fallbackErr } = await supabase
-            .from("check_in_out")
-            .update({ status: "Checked In" })
-            .eq("room_room_id", stay.room_room_id)
-            .eq("booking_booking_id", stay.booking_booking_id);
-          if (fallbackErr) throw fallbackErr;
-        } else {
-          throw error;
-        }
+      if (json.requiresConfirmation) {
+        setPendingCheckInStay(stay);
+        setCheckInWarning({
+          derivedStatus: json.derivedStatus || "Not Ready",
+          warnings: json.warnings || [],
+          note: json.note || "",
+        });
+        return;
       }
+
+      if (!res.ok) {
+        throw new Error(json.error || "Failed to check in.");
+      }
+
+      setPendingCheckInStay(null);
+      setCheckInWarning(null);
+      setActionNotice({
+        type: "success",
+        text: json.message || `Room #${stay.room_room_id} checked in.`,
+      });
       await fetchData();
     } catch (err: any) {
       console.error("Check in error:", err);
-      alert("Failed to check in: " + err.message);
+      setActionNotice({ type: "error", text: err.message || "Failed to check in." });
+    } finally {
+      setIsActionBusy(false);
     }
   };
 
   const handleCheckOut = async (stay: CheckInOut) => {
+    setIsActionBusy(true);
+    setActionNotice(null);
     try {
-      const now = nowInstant();
-      const { error } = await supabase
-        .from("check_in_out")
-        .update({
-          actual_check_out: now,
-          status: "Checked Out"
-        })
-        .eq("room_room_id", stay.room_room_id)
-        .eq("booking_booking_id", stay.booking_booking_id);
+      const res = await fetch("/api/operations/reception", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "check_out",
+          bookingId: stay.booking_booking_id,
+          roomId: stay.room_room_id,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to check out.");
 
-      if (error) {
-        if (error.message?.includes("actual_check_out")) {
-          const { error: fallbackErr } = await supabase
-            .from("check_in_out")
-            .update({ status: "Checked Out" })
-            .eq("room_room_id", stay.room_room_id)
-            .eq("booking_booking_id", stay.booking_booking_id);
-          if (fallbackErr) throw fallbackErr;
-        } else {
-          throw error;
-        }
-      }
+      setActionNotice({
+        type: "success",
+        text: json.message || `Room #${stay.room_room_id} checked out.`,
+      });
       await fetchData();
     } catch (err: any) {
       console.error("Check out error:", err);
-      alert("Failed to check out: " + err.message);
+      setActionNotice({ type: "error", text: err.message || "Failed to check out." });
+    } finally {
+      setIsActionBusy(false);
+    }
+  };
+
+  const handleMarkNoShow = async (stay: CheckInOut) => {
+    setIsActionBusy(true);
+    setActionNotice(null);
+    try {
+      const res = await fetch("/api/operations/reception", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "no_show",
+          bookingId: stay.booking_booking_id,
+          roomId: stay.room_room_id,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to mark no show.");
+
+      setActionNotice({
+        type: "success",
+        text: json.message || `Booking #${stay.booking_booking_id} marked No Show.`,
+      });
+      await fetchData();
+    } catch (err: any) {
+      console.error("No show error:", err);
+      setActionNotice({ type: "error", text: err.message || "Failed to mark no show." });
+    } finally {
+      setIsActionBusy(false);
     }
   };
 
@@ -368,11 +428,29 @@ export default function CheckInOutPage() {
             <RefreshCw className={`h-4 w-4 ${isSyncingAutoCheckout ? "animate-spin" : ""}`} />
             {isSyncingAutoCheckout ? "Checking Overdue..." : "Auto-Checkout Check"}
           </Button>
-          <Button onClick={handleOpenAdd} variant="gold" className="gap-2">
-            <Plus className="h-4 w-4" /> Allocate Room Stay
-          </Button>
+          {isAdmin && (
+            <Button onClick={handleOpenAdd} variant="gold" className="gap-2">
+              <Plus className="h-4 w-4" /> Allocate Room Stay
+            </Button>
+          )}
         </div>
       </div>
+
+      {/* Action Feedback Banner */}
+      {actionNotice && (
+        <div
+          className={`p-4 rounded-xl flex items-center justify-between gap-3 text-xs font-semibold border ${
+            actionNotice.type === "success"
+              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+              : "bg-red-50 border-red-200 text-red-700"
+          }`}
+        >
+          <span>{actionNotice.text}</span>
+          <Button variant="ghost" size="sm" onClick={() => setActionNotice(null)} className="text-xs h-7">
+            Dismiss
+          </Button>
+        </div>
+      )}
 
       {/* Auto Checkout System Notification Banner */}
       {autoCheckoutNotice && (
@@ -462,12 +540,25 @@ export default function CheckInOutPage() {
                       </td>
                       <td className="px-4 py-3 text-right space-x-2">
                         {(!s.status || s.status === "Scheduled") && (
-                          <Button size="sm" variant="gold" className="text-xs" onClick={() => handleCheckIn(s)}>
-                            Check In
-                          </Button>
+                          <>
+                            <Button size="sm" variant="gold" className="text-xs" disabled={isActionBusy} onClick={() => handleCheckIn(s)}>
+                              Check In
+                            </Button>
+                            {s.booking?.booking_status === "Confirmed" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-xs border-slate-300 text-slate-600"
+                                disabled={isActionBusy}
+                                onClick={() => handleMarkNoShow(s)}
+                              >
+                                No Show
+                              </Button>
+                            )}
+                          </>
                         )}
                         {s.status === "Checked In" && (
-                          <Button size="sm" variant="outline" className="text-xs border-amber-600 text-amber-600 hover:bg-amber-50" onClick={() => handleCheckOut(s)}>
+                          <Button size="sm" variant="outline" className="text-xs border-amber-600 text-amber-600 hover:bg-amber-50" disabled={isActionBusy} onClick={() => handleCheckOut(s)}>
                             Check Out
                           </Button>
                         )}
@@ -476,9 +567,11 @@ export default function CheckInOutPage() {
                             <Bot className="h-3 w-3" /> Auto Handled
                           </span>
                         )}
-                        <Button variant="ghost" size="sm" onClick={() => handleOpenDelete(s)}>
-                          <Trash2 className="h-4 w-4 text-red-600" />
-                        </Button>
+                        {isAdmin && (
+                          <Button variant="ghost" size="sm" onClick={() => handleOpenDelete(s)}>
+                            <Trash2 className="h-4 w-4 text-red-600" />
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -522,14 +615,23 @@ export default function CheckInOutPage() {
                     </div>
                   )}
                 </div>
-                <div className="pt-2 border-t border-slate-100 flex justify-end gap-2">
+                <div className="pt-2 border-t border-slate-100 flex flex-wrap justify-end gap-2">
                   {(!s.status || s.status === "Scheduled") && (
-                    <Button size="sm" variant="gold" onClick={() => handleCheckIn(s)}>Check In</Button>
+                    <>
+                      <Button size="sm" variant="gold" disabled={isActionBusy} onClick={() => handleCheckIn(s)}>Check In</Button>
+                      {s.booking?.booking_status === "Confirmed" && (
+                        <Button size="sm" variant="outline" disabled={isActionBusy} onClick={() => handleMarkNoShow(s)}>
+                          No Show
+                        </Button>
+                      )}
+                    </>
                   )}
                   {s.status === "Checked In" && (
-                    <Button size="sm" variant="outline" className="border-amber-600 text-amber-600 hover:bg-amber-50" onClick={() => handleCheckOut(s)}>Check Out</Button>
+                    <Button size="sm" variant="outline" className="border-amber-600 text-amber-600 hover:bg-amber-50" disabled={isActionBusy} onClick={() => handleCheckOut(s)}>Check Out</Button>
                   )}
-                  <Button variant="destructive" size="sm" onClick={() => handleOpenDelete(s)}>Delete</Button>
+                  {isAdmin && (
+                    <Button variant="destructive" size="sm" onClick={() => handleOpenDelete(s)}>Delete</Button>
+                  )}
                 </div>
               </div>
             ))}
@@ -630,6 +732,57 @@ export default function CheckInOutPage() {
             <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>Cancel</Button>
             <Button variant="destructive" onClick={handleDelete} disabled={isSaving}>
               {isSaving ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Check-in Readiness Warning Modal */}
+      <Dialog
+        open={Boolean(pendingCheckInStay && checkInWarning)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingCheckInStay(null);
+            setCheckInWarning(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-700">
+              <AlertTriangle className="h-5 w-5" />
+              Room #{pendingCheckInStay?.room_room_id} Not Ready ({checkInWarning?.derivedStatus})
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-slate-700">
+            <p>Checking in this guest now triggers an operational warning:</p>
+            <ul className="list-disc pl-5 space-y-1 text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
+              {(checkInWarning?.warnings || []).map((w, idx) => (
+                <li key={idx}>{w}</li>
+              ))}
+            </ul>
+            {checkInWarning?.note && (
+              <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2.5">
+                Note: {checkInWarning.note}
+              </p>
+            )}
+          </div>
+          <DialogFooter className="pt-3">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setPendingCheckInStay(null);
+                setCheckInWarning(null);
+              }}
+            >
+              Cancel Check-In
+            </Button>
+            <Button
+              variant="gold"
+              disabled={isActionBusy}
+              onClick={() => pendingCheckInStay && handleCheckIn(pendingCheckInStay, true)}
+            >
+              {isActionBusy ? "Checking In..." : "Confirm Check In Anyway"}
             </Button>
           </DialogFooter>
         </DialogContent>

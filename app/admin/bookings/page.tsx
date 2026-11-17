@@ -3,6 +3,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useUser } from "@clerk/nextjs";
+import { useStaffRole } from "@/lib/roleContext";
 import { supabase } from "@/lib/supabaseClient";
 import { Booking, Customer } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
@@ -31,10 +32,15 @@ import { Plus, Search, Calendar, User, Trash2, Edit, CheckCircle, Clock, XCircle
 
 export default function BookingsPage() {
   const { user } = useUser();
+  const { role } = useStaffRole();
+  const isAdmin = role === "Admin";
+
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [actionNotice, setActionNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [busyBookingId, setBusyBookingId] = useState<number | null>(null);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -51,22 +57,51 @@ export default function BookingsPage() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [isAdmin]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [bRes, cRes] = await Promise.all([
-        supabase.from("booking").select("*, customer(*)").order("booking_id", { ascending: false }),
-        supabase.from("customer").select("*").order("cust_fname", { ascending: true }),
-      ]);
+      const recRes = await fetch("/api/operations/reception");
+      if (recRes.ok) {
+        const recJson = await recRes.json();
+        setBookings(recJson.bookings || []);
+      }
 
-      if (bRes.data) setBookings(bRes.data);
-      if (cRes.data) setCustomers(cRes.data);
+      if (isAdmin) {
+        const { data: cData } = await supabase
+          .from("customer")
+          .select("*")
+          .order("cust_fname", { ascending: true });
+        if (cData) setCustomers(cData);
+      }
     } catch (error) {
       console.error("Error fetching bookings:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleMarkNoShow = async (b: Booking) => {
+    setBusyBookingId(b.booking_id);
+    setActionNotice(null);
+    try {
+      const res = await fetch("/api/operations/reception", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "no_show",
+          bookingId: b.booking_id,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to mark No Show.");
+      setActionNotice({ type: "success", text: json.message || `Booking #${b.booking_id} marked No Show.` });
+      await fetchData();
+    } catch (err: any) {
+      setActionNotice({ type: "error", text: err.message || "Failed to mark No Show." });
+    } finally {
+      setBusyBookingId(null);
     }
   };
 
@@ -237,12 +272,33 @@ export default function BookingsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
         <div>
           <h1 className="text-2xl font-bold text-navy-900">Guest Bookings</h1>
-          <p className="text-slate-500 text-sm">Manage hotel reservations, booking board types, and statuses.</p>
+          <p className="text-slate-500 text-sm">
+            {isAdmin
+              ? "Manage hotel reservations, booking board types, and statuses."
+              : "View guest reservations, inspect dossiers, handle No Show updates, and trigger guest-requested cancellations."}
+          </p>
         </div>
-        <Button onClick={handleOpenAdd} variant="gold" className="gap-2">
-          <Plus className="h-4 w-4" /> New Booking
-        </Button>
+        {isAdmin && (
+          <Button onClick={handleOpenAdd} variant="gold" className="gap-2">
+            <Plus className="h-4 w-4" /> New Booking
+          </Button>
+        )}
       </div>
+
+      {actionNotice && (
+        <div
+          className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between border ${
+            actionNotice.type === "success"
+              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+              : "bg-red-50 border-red-200 text-red-700"
+          }`}
+        >
+          <span>{actionNotice.text}</span>
+          <button onClick={() => setActionNotice(null)} className="ml-2 font-bold">
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Filter Bar */}
       <div className="relative max-w-md">
@@ -298,12 +354,28 @@ export default function BookingsPage() {
                             <Eye className="h-4 w-4 text-gold-600" />
                           </Link>
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(b)} title="Edit Booking">
-                          <Edit className="h-4 w-4 text-slate-600" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleOpenDelete(b)} title="Delete Booking">
-                          <Trash2 className="h-4 w-4 text-red-600" />
-                        </Button>
+                        {b.booking_status === "Confirmed" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busyBookingId === b.booking_id}
+                            onClick={() => handleMarkNoShow(b)}
+                            className="text-xs border-slate-300 text-slate-700"
+                            title="Mark Confirmed Booking as No Show"
+                          >
+                            No Show
+                          </Button>
+                        )}
+                        {isAdmin && (
+                          <>
+                            <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(b)} title="Edit Booking">
+                              <Edit className="h-4 w-4 text-slate-600" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleOpenDelete(b)} title="Delete Booking">
+                              <Trash2 className="h-4 w-4 text-red-600" />
+                            </Button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -329,9 +401,26 @@ export default function BookingsPage() {
                   <div><strong className="text-slate-700">Date:</strong> {formatDate(b.booking_date)}</div>
                   <div><strong className="text-slate-700">Type:</strong> {b.booking_type}</div>
                 </div>
-                <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-                  <Button variant="outline" size="sm" onClick={() => handleOpenEdit(b)}>Edit</Button>
-                  <Button variant="destructive" size="sm" onClick={() => handleOpenDelete(b)}>Delete</Button>
+                <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-slate-100">
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={`/admin/bookings/${b.booking_id}`}>View</Link>
+                  </Button>
+                  {b.booking_status === "Confirmed" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busyBookingId === b.booking_id}
+                      onClick={() => handleMarkNoShow(b)}
+                    >
+                      No Show
+                    </Button>
+                  )}
+                  {isAdmin && (
+                    <>
+                      <Button variant="outline" size="sm" onClick={() => handleOpenEdit(b)}>Edit</Button>
+                      <Button variant="destructive" size="sm" onClick={() => handleOpenDelete(b)}>Delete</Button>
+                    </>
+                  )}
                 </div>
               </div>
             ))}

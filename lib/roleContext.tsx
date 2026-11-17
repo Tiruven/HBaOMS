@@ -3,8 +3,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useUser } from "@clerk/nextjs";
-import { supabase } from "@/lib/supabaseClient";
-import { StaffRole, Staff } from "@/lib/types";
+import { StaffRole, Staff, normalizeStaffRole } from "@/lib/types";
 
 export type AdminModulePath =
   | "/admin/dashboard"
@@ -20,6 +19,7 @@ export type AdminModulePath =
   | "/admin/payments"
   | "/admin/notifications"
   | "/admin/maintenance"
+  | "/admin/housekeeping"
   | "/admin/pricing-rules"
   | "/admin/room-features"
   | "/admin/service-bookings"
@@ -41,30 +41,39 @@ export const ROLE_PERMISSIONS: Record<StaffRole, AdminModulePath[]> = {
     "/admin/payments",
     "/admin/notifications",
     "/admin/maintenance",
+    "/admin/housekeeping",
     "/admin/pricing-rules",
     "/admin/room-features",
     "/admin/service-bookings",
     "/admin/trips",
     "/admin/trip-bookings",
   ],
-  Receptnst: [
+  Receptionist: [
     "/admin/dashboard",
     "/admin/bookings",
-    "/admin/customers",
     "/admin/check-in-out",
-    "/admin/service-bookings",
-    "/admin/trip-bookings",
-    "/admin/notifications",
-    "/admin/payments",
+    "/admin/customers",
     "/admin/rooms",
-    "/admin/features",
-    "/admin/room-features",
   ],
-  Housekpr: ["/admin/dashboard", "/admin/rooms", "/admin/maintenance"],
-  Technician: ["/admin/dashboard", "/admin/maintenance"],
-  Plumber: ["/admin/dashboard", "/admin/maintenance"],
-  Electric: ["/admin/dashboard", "/admin/maintenance"],
-  Chef: ["/admin/dashboard", "/admin/service-bookings"],
+  "Service Supervisor": [
+    "/admin/dashboard",
+    "/admin/service-bookings",
+  ],
+  "Activities Supervisor": [
+    "/admin/dashboard",
+    "/admin/trip-bookings",
+    "/admin/trips",
+  ],
+  "Housekeeping Supervisor": [
+    "/admin/dashboard",
+    "/admin/housekeeping",
+    "/admin/rooms",
+  ],
+  "Maintenance Supervisor": [
+    "/admin/dashboard",
+    "/admin/maintenance",
+    "/admin/rooms",
+  ],
 };
 
 interface StaffRoleContextType {
@@ -102,21 +111,22 @@ export const StaffRoleProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       try {
-        const { data, error } = await supabase
-          .from("staff")
-          .select("*")
-          .ilike("email", email.trim())
-          .single();
-
-        if (!error && data) {
-          setRole(data.role as StaffRole);
-          setStaffData(data);
-        } else {
-          setRole(null);
+        // Read active role directly from DB-backed server route on every load
+        const res = await fetch("/api/staff?me=1", { cache: "no-store" });
+        if (res.ok) {
+          const json = await res.json();
+          if (json?.staff && json.staff.is_active === "Y") {
+            setRole(normalizeStaffRole(json.staff.role));
+            setStaffData(json.staff);
+            return;
+          }
         }
+        setRole(null);
+        setStaffData(null);
       } catch (err) {
         console.error("Error fetching staff role:", err);
         setRole(null);
+        setStaffData(null);
       } finally {
         setIsLoadingRole(false);
       }

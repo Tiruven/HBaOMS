@@ -58,6 +58,7 @@ export default function RoomTypesPage() {
     size: number;
     max_adults: number;
     max_children: number;
+    cleaning_minutes: number;
     image_path?: string | null;
   }) => {
     setIsLoading(true);
@@ -89,14 +90,15 @@ export default function RoomTypesPage() {
             size: values.size,
             max_adults: values.max_adults,
             max_children: values.max_children,
+            cleaning_minutes: values.cleaning_minutes,
             image_path: values.image_path || null,
             updated_by_: currentUserEmail,
             date_updated: now,
           })
           .eq("room_type_id", selectedRoomType.room_type_id);
 
-        // Fallback retry if schema cache doesn't have image_path yet
-        if (error && error.message?.includes("image_path")) {
+        // Fallback retry if schema cache doesn't have image_path or cleaning_minutes yet
+        if (error && (error.message?.includes("image_path") || error.message?.includes("cleaning_minutes"))) {
           const retry = await supabase
             .from("room_type")
             .update({
@@ -136,13 +138,14 @@ export default function RoomTypesPage() {
             size: values.size,
             max_adults: values.max_adults,
             max_children: values.max_children,
+            cleaning_minutes: values.cleaning_minutes,
             image_path: values.image_path || null,
             created_by: currentUserEmail,
             date_created: now,
           },
         ]);
 
-        if (error && error.message?.includes("image_path")) {
+        if (error && (error.message?.includes("image_path") || error.message?.includes("cleaning_minutes"))) {
           const retry = await supabase.from("room_type").insert([
             {
               type: trimmedType,
@@ -240,6 +243,14 @@ export default function RoomTypesPage() {
       cell: (row) => (
         <span className="text-xs font-medium text-slate-700">
           Max {row.max_adults || 2} Adults, {row.max_children ?? 2} Children
+        </span>
+      ),
+    },
+    {
+      header: "Cleaning Time",
+      cell: (row) => (
+        <span className="text-xs font-semibold text-amber-700">
+          {row.cleaning_minutes ?? 45} mins
         </span>
       ),
     },

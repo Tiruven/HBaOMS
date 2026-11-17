@@ -9,6 +9,7 @@ import { mauritiusToday } from "@/lib/time";
 import { formatCurrency } from "@/lib/utils";
 import { isRoomAvailableForDates, getEffectiveRoomPrice, OccupiedStay } from "@/lib/searchUtils";
 import { validateStayDates } from "@/lib/searchValidation";
+import { getRoomReadiness, RoomReadinessMaintInput } from "@/lib/roomReadiness";
 import { RoomCard } from "@/components/customer/RoomCard";
 import { SkeletonCard } from "@/components/shared/SkeletonCard";
 import { Input } from "@/components/ui/input";
@@ -49,6 +50,7 @@ export default function CustomerRoomsPage() {
   const [features, setFeatures] = useState<Feature[]>([]);
   const [pricingRules, setPricingRules] = useState<PricingRule[]>([]);
   const [occupiedStays, setOccupiedStays] = useState<OccupiedStay[]>([]);
+  const [openMaintByRoom, setOpenMaintByRoom] = useState<Record<number, RoomReadinessMaintInput[]>>({});
   const [loading, setLoading] = useState<boolean>(true);
 
   // Filters from URL or Defaults
@@ -147,7 +149,7 @@ export default function CustomerRoomsPage() {
     async function fetchData() {
       setLoading(true);
       try {
-        const [rRes, rtRes, fRes, prRes, staysRes] = await Promise.all([
+        const [rRes, rtRes, fRes, prRes, staysRes, mrRes] = await Promise.all([
           supabase
             .from("room")
             .select("*, room_type(*), room_feature(feature_feature_id, feature(*))")
@@ -160,12 +162,29 @@ export default function CustomerRoomsPage() {
             .select("room_room_id, check_in_date, check_out_date, booking!inner(booking_status)")
             .neq("booking.booking_status", "Cancelled")
             .gte("check_out_date", todayStr),
+          supabase
+            .from("maintenance_request")
+            .select("mr_id, room_room_id, priority, request_status, mr_desc")
+            .in("request_status", ["Pending", "In Progress", "Open"]),
         ]);
 
         if (rRes.data) setRooms(rRes.data);
         if (rtRes.data) setRoomTypes(rtRes.data);
         if (fRes.data) setFeatures(fRes.data);
         if (prRes.data) setPricingRules(prRes.data);
+        if (mrRes.data) {
+          const grouped: Record<number, RoomReadinessMaintInput[]> = {};
+          for (const m of mrRes.data as any[]) {
+            if (!grouped[m.room_room_id]) grouped[m.room_room_id] = [];
+            grouped[m.room_room_id].push({
+              maintenanceId: m.mr_id,
+              priority: m.priority,
+              status: m.request_status,
+              description: m.mr_desc,
+            });
+          }
+          setOpenMaintByRoom(grouped);
+        }
         if (staysRes.data) {
           setOccupiedStays(
             staysRes.data.map((s) => ({
@@ -276,8 +295,18 @@ export default function CustomerRoomsPage() {
   const filteredAndSortedRooms = useMemo(() => {
     return rooms
       .filter((r) => {
-        // 1. Explicit availability check: room_status not Maintenance
-        if (r.room_status === "Maintenance") return false;
+        // 1. Operational availability check via shared readiness calculator:
+        // Only Maintenance (stored or High/Urgent ticket) blocks bookings; Cleaning never blocks.
+        const readiness = getRoomReadiness({
+          roomId: r.room_id,
+          storedRoomStatus: r.room_status === "Maintenance" ? "Maintenance" : "Available",
+          cleaningMinutes: Number(r.room_type?.cleaning_minutes) || 45,
+          now: new Date(),
+          activeOrLastStay: null,
+          openHousekeepingRequests: [],
+          openMaintenanceTickets: openMaintByRoom[r.room_id] || [],
+        });
+        if (readiness.isBlockedForWizard) return false;
 
         // 2. Date overlap check against confirmed reservations (only if dates are explicitly selected)
         if (!dateError && checkInDate && checkOutDate) {
@@ -358,6 +387,7 @@ export default function CustomerRoomsPage() {
     searchQuery,
     sortBy,
     pricingRules,
+    openMaintByRoom,
   ]);
 
   // Navigate directly into Booking Wizard with preserved dates & guest counts

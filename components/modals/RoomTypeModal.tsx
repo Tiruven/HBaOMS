@@ -26,6 +26,11 @@ const roomTypeSchema = z.object({
   size: z.coerce.number().positive("Size must be greater than 0"),
   max_adults: z.coerce.number().int().min(1, "At least 1 adult required"),
   max_children: z.coerce.number().int().min(0, "Cannot be negative"),
+  cleaning_minutes: z.coerce
+    .number()
+    .int("Must be whole minutes")
+    .min(1, "Minimum 1 minute (allows quick live testing)")
+    .max(480, "Maximum 480 minutes (8 hours)"),
   image_path: z.string().nullable().optional(),
 });
 
@@ -62,6 +67,7 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
       size: 30,
       max_adults: 2,
       max_children: 2,
+      cleaning_minutes: 45,
       image_path: null,
     },
   });
@@ -75,6 +81,7 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
         size: initialData.size,
         max_adults: initialData.max_adults || 2,
         max_children: initialData.max_children ?? 2,
+        cleaning_minutes: initialData.cleaning_minutes ?? 45,
         image_path: initialData.image_path || null,
       });
     } else {
@@ -84,6 +91,7 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
         size: 30,
         max_adults: 2,
         max_children: 2,
+        cleaning_minutes: 45,
         image_path: null,
       });
     }
@@ -206,6 +214,26 @@ export const RoomTypeModal: React.FC<RoomTypeModalProps> = ({
                 <p className="text-xs text-red-600 font-medium">{errors.max_children.message}</p>
               )}
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="cleaning_minutes">
+              Cleaning Time in Minutes (includes worker travel time) *
+            </Label>
+            <Input
+              id="cleaning_minutes"
+              type="number"
+              min="1"
+              max="480"
+              placeholder="45"
+              {...register("cleaning_minutes")}
+            />
+            <p className="text-[11px] text-slate-500">
+              Includes worker travel time from housekeeping station to room (1 to 480 mins; 1 min allowed for live demo).
+            </p>
+            {errors.cleaning_minutes && (
+              <p className="text-xs text-red-600 font-medium">{errors.cleaning_minutes.message}</p>
+            )}
           </div>
 
           {initialData && <AuditFieldsView data={initialData} />}

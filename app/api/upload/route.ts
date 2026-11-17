@@ -77,18 +77,18 @@ export async function POST(req: Request) {
     const user = await currentUser();
     const userEmail = user?.primaryEmailAddress?.emailAddress || "";
 
-    // Check staff role in Supabase staff table (or allow authorized Clerk admin email)
+    // Check active staff role in Supabase staff table
     if (userEmail) {
       const { data: staffMember } = await supabase
         .from("staff")
-        .select("role")
-        .eq("email", userEmail)
+        .select("role, is_active")
+        .ilike("email", userEmail.trim())
         .maybeSingle();
 
-      const userRole = (staffMember?.role as string) || (user?.publicMetadata?.role as string) || "";
+      const rawRole = (staffMember?.role as string) || "";
+      const isActive = staffMember?.is_active === "Y";
       const isAllowed =
-        userRole === "Admin" ||
-        userRole === "Receptnst" ||
+        (isActive && (rawRole === "Admin" || rawRole === "Receptionist" || rawRole === "Receptnst")) ||
         userEmail.includes("admin") ||
         process.env.NODE_ENV === "development";
 

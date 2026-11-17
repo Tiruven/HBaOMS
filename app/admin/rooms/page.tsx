@@ -11,15 +11,21 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Pencil, Trash2 } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
+import { useStaffRole } from "@/lib/roleContext";
 import { supabase } from "@/lib/supabaseClient";
+import { fetchAllRoomsReadiness, RoomReadinessResult } from "@/lib/roomReadiness";
+import { formatMauritius } from "@/lib/time";
 
 export default function RoomsPage() {
   const { user } = useUser();
+  const { role } = useStaffRole();
+  const isAdmin = role === "Admin";
   const currentUserEmail = user?.primaryEmailAddress?.emailAddress || "admin@hbaoms.com";
 
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
   const [features, setFeatures] = useState<Feature[]>([]);
+  const [readinessMap, setReadinessMap] = useState<Record<number, RoomReadinessResult>>({});
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -28,13 +34,14 @@ export default function RoomsPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [rRes, rtRes, fRes] = await Promise.all([
+      const [rRes, rtRes, fRes, readinessRes] = await Promise.all([
         supabase
           .from("room")
           .select("*, room_type(*), room_feature(feature(*))")
           .order("room_id"),
         supabase.from("room_type").select("*").order("room_type_id"),
         supabase.from("feature").select("*").order("feature_id"),
+        fetchAllRoomsReadiness(supabase),
       ]);
 
       if (!rRes.error && rRes.data) {
@@ -45,6 +52,9 @@ export default function RoomsPage() {
       }
       if (!fRes.error && fRes.data) {
         setFeatures(fRes.data);
+      }
+      if (readinessRes?.readinessByRoomId) {
+        setReadinessMap(readinessRes.readinessByRoomId);
       }
     } catch (err) {
       console.error("Error fetching rooms data:", err);
@@ -275,15 +285,67 @@ export default function RoomsPage() {
       cell: (row) => <span>{getRoomTypeName(row.room_type_room_type_id)}</span>,
     },
     {
-      header: "Status",
-      cell: (row) => (
-        <Badge
-          variant={row.room_status === "Available" ? "success" : "destructive"}
-          className="uppercase tracking-wider font-bold"
-        >
-          {row.room_status}
-        </Badge>
-      ),
+      header: "Operational Status",
+      cell: (row) => {
+        const info = readinessMap[row.room_id];
+        const status = info?.derivedStatus || row.room_status;
+        const badgeStyle =
+          status === "Available"
+            ? "bg-emerald-500 text-white"
+            : status === "Occupied"
+            ? "bg-blue-600 text-white"
+            : status === "Cleaning"
+            ? "bg-amber-500 text-white"
+            : "bg-red-600 text-white";
+        return (
+          <Badge className={`uppercase tracking-wider font-bold text-[10px] ${badgeStyle}`}>
+            {status}
+          </Badge>
+        );
+      },
+    },
+    {
+      header: "Housekeeping Status",
+      cell: (row) => {
+        const info = readinessMap[row.room_id];
+        if (!info) return <span className="text-xs text-slate-400">-</span>;
+        return (
+          <span className="text-xs font-medium text-slate-700">
+            {info.housekeepingStatus}
+            {info.cleaningActive && info.remainingMinutes > 0
+              ? ` (${info.remainingMinutes} min left)`
+              : ""}
+          </span>
+        );
+      },
+    },
+    {
+      header: "Maintenance Status",
+      cell: (row) => {
+        const info = readinessMap[row.room_id];
+        if (!info) return <span className="text-xs text-slate-400">-</span>;
+        const color =
+          info.maintenanceStatus === "Blocked (High/Urgent)"
+            ? "text-red-700 font-semibold"
+            : info.maintenanceStatus === "Low/Medium Open"
+            ? "text-amber-700 font-medium"
+            : "text-slate-600";
+        return <span className={`text-xs ${color}`}>{info.maintenanceStatus}</span>;
+      },
+    },
+    {
+      header: "Expected Ready",
+      cell: (row) => {
+        const info = readinessMap[row.room_id];
+        if (!info?.expectedReadyAt) {
+          return <span className="text-xs text-slate-400">-</span>;
+        }
+        return (
+          <span className="text-xs font-mono text-slate-700">
+            {formatMauritius(info.expectedReadyAt, "time")}
+          </span>
+        );
+      },
     },
     {
       header: "Features",
@@ -307,45 +369,53 @@ export default function RoomsPage() {
         <span className="text-xs text-slate-500">{formatDate(row.date_created)}</span>
       ),
     },
-    {
-      header: "Actions",
-      className: "w-28 text-right",
-      cell: (row) => (
-        <div className="flex items-center justify-end space-x-2">
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => handleOpenEdit(row)}
-            className="h-8 w-8 text-navy-900 hover:bg-navy-50"
-            title="Edit Room"
-          >
-            <Pencil className="h-4 w-4" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => handleOpenDelete(row)}
-            className="h-8 w-8 text-red-600 hover:bg-red-50"
-            title="Delete Room"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
-      ),
-    },
+    ...(isAdmin
+      ? [
+          {
+            header: "Actions",
+            className: "w-28 text-right",
+            cell: (row: Room) => (
+              <div className="flex items-center justify-end space-x-2">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => handleOpenEdit(row)}
+                  className="h-8 w-8 text-navy-900 hover:bg-navy-50"
+                  title="Edit Room"
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => handleOpenDelete(row)}
+                  className="h-8 w-8 text-red-600 hover:bg-red-50"
+                  title="Delete Room"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ),
+          } as Column<Room>,
+        ]
+      : []),
   ];
 
   return (
     <div>
       <DataTable
         title="Physical Rooms Directory"
-        description="Oversee individual guest room numbers, statuses, amenities, and room photography."
+        description={
+          isAdmin
+            ? "Oversee individual guest room numbers, live operational readiness, amenities, and room photography."
+            : "Live room operational readiness overview across housekeeping, check-in status, and maintenance."
+        }
         data={rooms}
         columns={columns}
         isLoading={isLoading}
         searchKey="room_desc"
         searchPlaceholder="Filter rooms by name/number..."
-        onAddNew={handleOpenAdd}
+        onAddNew={isAdmin ? handleOpenAdd : undefined}
         addNewLabel="Add Room"
       />
 

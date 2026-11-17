@@ -25,7 +25,7 @@ interface DataTableProps<T> {
   data: T[];
   searchKey: keyof T;
   searchPlaceholder?: string;
-  onAddNew: () => void;
+  onAddNew?: () => void;
   addNewLabel?: string;
   extraAction?: React.ReactNode;
   title: string;
@@ -67,10 +67,12 @@ export function DataTable<T extends Record<string, any>>({
         </div>
         <div className="flex items-center gap-2">
           {extraAction}
-          <Button onClick={onAddNew} variant="gold" className="gap-2 shrink-0">
-            <Plus className="h-4 w-4" />
-            {addNewLabel}
-          </Button>
+          {onAddNew && (
+            <Button onClick={onAddNew} variant="gold" className="gap-2 shrink-0">
+              <Plus className="h-4 w-4" />
+              {addNewLabel}
+            </Button>
+          )}
         </div>
       </div>
 

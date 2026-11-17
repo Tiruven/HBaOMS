@@ -3,6 +3,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useUser } from "@clerk/nextjs";
+import { useStaffRole } from "@/lib/roleContext";
 import { supabase } from "@/lib/supabaseClient";
 import { ServiceBooking, Service, Booking } from "@/lib/types";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -44,15 +45,36 @@ import {
   XCircle,
   AlertCircle,
   Loader2,
+  UtensilsCrossed,
 } from "lucide-react";
+
+interface MealPlanRoom {
+  roomId: number;
+  roomDesc: string;
+  roomType: string;
+  bookingId: number;
+  boardType: "HB" | "FB";
+  bookingStatus: string;
+  stayStatus: string;
+  numAdults: number;
+  numChildren: number;
+  checkInDate: string;
+  checkOutDate: string;
+}
 
 export default function ServiceBookingsPage() {
   const { user } = useUser();
+  const { role } = useStaffRole();
+  const isAdmin = role === "Admin";
+
   const [sbList, setSbList] = useState<ServiceBooking[]>([]);
+  const [mealPlanRooms, setMealPlanRooms] = useState<MealPlanRoom[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<"services" | "meal-plans">("services");
+  const [updatingSbId, setUpdatingSbId] = useState<number | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Edit / Add Modal
@@ -80,24 +102,50 @@ export default function ServiceBookingsPage() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [isAdmin]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [sbRes, sRes, bRes] = await Promise.all([
-        supabase.from("service_booking").select("*, service(*), booking(*, customer(*))").order("sb_id", { ascending: false }),
-        supabase.from("service").select("*").order("service_name", { ascending: true }),
-        supabase.from("booking").select("*, customer(*)").order("booking_id", { ascending: false }),
-      ]);
+      const opsRes = await fetch("/api/operations/services");
+      if (opsRes.ok) {
+        const opsJson = await opsRes.json();
+        setSbList(opsJson.serviceBookings || []);
+        setMealPlanRooms(opsJson.mealPlanRooms || []);
+      }
 
-      if (sbRes.data) setSbList(sbRes.data);
-      if (sRes.data) setServices(sRes.data);
-      if (bRes.data) setBookings(bRes.data);
+      if (isAdmin) {
+        const [sRes, bRes] = await Promise.all([
+          supabase.from("service").select("*").order("service_name", { ascending: true }),
+          supabase.from("booking").select("*, customer(*)").order("booking_id", { ascending: false }),
+        ]);
+        if (sRes.data) setServices(sRes.data);
+        if (bRes.data) setBookings(bRes.data);
+      }
     } catch (err) {
       console.error("Fetch service bookings error:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleQuickStatusChange = async (sbId: number, status: ServiceBooking["sb_status"]) => {
+    setUpdatingSbId(sbId);
+    setFeedbackMsg(null);
+    try {
+      const res = await fetch("/api/operations/services", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sbId, status }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to update status.");
+      setFeedbackMsg({ type: "success", text: `Service booking #${sbId} updated to ${status}.` });
+      await fetchData();
+    } catch (err: any) {
+      setFeedbackMsg({ type: "error", text: err.message || "Failed to update status." });
+    } finally {
+      setUpdatingSbId(null);
     }
   };
 
@@ -279,12 +327,43 @@ export default function ServiceBookingsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold text-navy-900">Service Reservations</h1>
-          <p className="text-slate-500 text-sm">Spa, dining, and custom hotel service bookings for guests.</p>
+          <h1 className="text-2xl font-bold text-navy-900">Service Operations & Meal Plans</h1>
+          <p className="text-slate-500 text-sm">
+            {isAdmin
+              ? "Spa, dining, and custom hotel service bookings plus Half Board / Full Board room overview."
+              : "Track service delivery status and view rooms with Half Board (HB) or Full Board (FB) meal plans."}
+          </p>
         </div>
-        <Button onClick={handleOpenAdd} variant="gold" className="gap-2">
-          <Plus className="h-4 w-4" /> Book Service
-        </Button>
+        {isAdmin && (
+          <Button onClick={handleOpenAdd} variant="gold" className="gap-2">
+            <Plus className="h-4 w-4" /> Book Service
+          </Button>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setActiveTab("services")}
+          className={`px-4 py-2 rounded-xl text-sm font-semibold border transition ${
+            activeTab === "services"
+              ? "bg-navy-900 text-white border-navy-900"
+              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+          }`}
+        >
+          Service Reservations ({sbList.length})
+        </button>
+        <button
+          onClick={() => setActiveTab("meal-plans")}
+          className={`px-4 py-2 rounded-xl text-sm font-semibold border transition inline-flex items-center gap-2 ${
+            activeTab === "meal-plans"
+              ? "bg-[#A37836] text-white border-[#A37836]"
+              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+          }`}
+        >
+          <UtensilsCrossed className="h-4 w-4" />
+          HB & FB Meal Plan Rooms ({mealPlanRooms.length})
+        </button>
       </div>
 
       {feedbackMsg && (
@@ -314,6 +393,62 @@ export default function ServiceBookingsPage() {
 
       {loading ? (
         <SkeletonTable rows={5} columns={8} />
+      ) : activeTab === "meal-plans" ? (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-slate-200 bg-slate-50/70">
+            <h2 className="font-bold text-navy-900 text-sm flex items-center gap-2">
+              <UtensilsCrossed className="h-4 w-4 text-[#A37836]" />
+              Half Board (HB) & Full Board (FB) Room Stays
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Rooms with meal plans active or arriving soon. Shows room, plan, headcount, and stay dates only.
+            </p>
+          </div>
+          {mealPlanRooms.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-sm">
+              No active or upcoming Half Board / Full Board room stays.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-600 uppercase text-[11px] font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3">Room</th>
+                    <th className="px-4 py-3">Room Type</th>
+                    <th className="px-4 py-3">Meal Plan</th>
+                    <th className="px-4 py-3">Guests</th>
+                    <th className="px-4 py-3">Stay Dates</th>
+                    <th className="px-4 py-3">Stay Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {mealPlanRooms.map((rm) => (
+                    <tr key={`${rm.bookingId}-${rm.roomId}`} className="hover:bg-slate-50/50">
+                      <td className="px-4 py-3 font-semibold text-navy-900">
+                        #{rm.roomId} - {rm.roomDesc}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{rm.roomType}</td>
+                      <td className="px-4 py-3">
+                        <Badge className={rm.boardType === "FB" ? "bg-[#A37836] text-white" : "bg-navy-900 text-white"}>
+                          {rm.boardType === "FB" ? "Full Board (FB)" : "Half Board (HB)"}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-slate-700 font-medium">
+                        {rm.numAdults} Adults{rm.numChildren > 0 ? `, ${rm.numChildren} Children` : ""}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-600">
+                        {formatDate(rm.checkInDate)} to {formatDate(rm.checkOutDate)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant="outline">{rm.stayStatus}</Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       ) : (
         <>
           <div className="hidden md:block bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -355,21 +490,39 @@ export default function ServiceBookingsPage() {
                       <td className="px-4 py-3 text-slate-700 font-semibold">{sb.num_person}</td>
                       <td className="px-4 py-3 font-bold text-emerald-600">{formatCurrency(sb.total_amount)}</td>
                       <td className="px-4 py-3">{getStatusBadge(sb.sb_status)}</td>
-                      <td className="px-4 py-3 text-right space-x-1">
-                        <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(sb)} title="Edit">
-                          <Edit className="h-4 w-4 text-slate-600" />
-                        </Button>
-                        {sb.sb_status !== "Cancelled" && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            title="Cancel Service (100% Refund to Guest)"
-                            onClick={() => handleOpenCancel(sb)}
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                      <td className="px-4 py-3 text-right">
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          <select
+                            aria-label={`Update status for service booking ${sb.sb_id}`}
+                            disabled={updatingSbId === sb.sb_id}
+                            value={sb.sb_status}
+                            onChange={(e) => handleQuickStatusChange(sb.sb_id, e.target.value as ServiceBooking["sb_status"])}
+                            className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700"
                           >
-                            <XCircle className="h-4 w-4" />
-                          </Button>
-                        )}
+                            <option value="Pending">Pending</option>
+                            <option value="In Progress">In Progress</option>
+                            <option value="Completed">Completed</option>
+                            <option value="Cancelled">Cancelled</option>
+                          </select>
+                          {isAdmin && (
+                            <>
+                              <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(sb)} title="Edit">
+                                <Edit className="h-4 w-4 text-slate-600" />
+                              </Button>
+                              {sb.sb_status !== "Cancelled" && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Cancel Service (100% Refund to Guest)"
+                                  onClick={() => handleOpenCancel(sb)}
+                                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                >
+                                  <XCircle className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -390,12 +543,28 @@ export default function ServiceBookingsPage() {
                   <span>Guest: {sb.booking?.customer?.cust_fname}</span>
                   <span className="font-bold text-emerald-600">{formatCurrency(sb.total_amount)}</span>
                 </div>
-                <div className="pt-2 border-t border-slate-100 flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={() => handleOpenEdit(sb)}>Edit</Button>
-                  {sb.sb_status !== "Cancelled" && (
-                    <Button variant="destructive" size="sm" onClick={() => handleOpenCancel(sb)}>
-                      Cancel (100% Refund)
-                    </Button>
+                <div className="pt-2 border-t border-slate-100 flex flex-wrap justify-between items-center gap-2">
+                  <select
+                    aria-label={`Update status for service booking ${sb.sb_id}`}
+                    disabled={updatingSbId === sb.sb_id}
+                    value={sb.sb_status}
+                    onChange={(e) => handleQuickStatusChange(sb.sb_id, e.target.value as ServiceBooking["sb_status"])}
+                    className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700"
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Completed">Completed</option>
+                    <option value="Cancelled">Cancelled</option>
+                  </select>
+                  {isAdmin && (
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => handleOpenEdit(sb)}>Edit</Button>
+                      {sb.sb_status !== "Cancelled" && (
+                        <Button variant="destructive" size="sm" onClick={() => handleOpenCancel(sb)}>
+                          Cancel (100% Refund)
+                        </Button>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
